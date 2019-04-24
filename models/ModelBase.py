@@ -95,7 +95,7 @@ class ModelBase(object):
 
         if ask_batch_size and (self.iter == 0 or ask_override):
             default_batch_size = 0 if self.iter == 0 else self.options.get('batch_size',0)
-            self.options['batch_size'] = max(0, io.input_int("Batch_size (?:help skip:%d) : " % (default_batch_size), default_batch_size, help_message="Larger batch size is always better for NN's generalization, but it can cause Out of Memory error. Tune this value for your videocard manually."))
+            self.options['batch_size'] = max(0, io.input_int("Batch_size (?:help skip:%d) : " % (default_batch_size), default_batch_size, help_message="Larger batch size is better for NN's generalization, but it can cause Out of Memory error. Tune this value for your videocard manually."))
         else:
             self.options['batch_size'] = self.options.get('batch_size', 0)
 
@@ -117,12 +117,12 @@ class ModelBase(object):
             else:
                 self.options['src_scale_mod'] = self.options.get('src_scale_mod', 0)
 
-        self.write_preview_history = self.options['write_preview_history']
-        if not self.options['write_preview_history']:
+        self.write_preview_history = self.options.get('write_preview_history', False)
+        if not self.write_preview_history and 'write_preview_history' in self.options:
             self.options.pop('write_preview_history')
 
-        self.target_iter = self.options['target_iter']
-        if self.options['target_iter'] == 0:
+        self.target_iter = self.options.get('target_iter',0)
+        if self.target_iter == 0 and 'target_iter' in self.options:
             self.options.pop('target_iter')
 
         self.batch_size = self.options.get('batch_size',0)
@@ -373,7 +373,10 @@ class ModelBase(object):
             plist = []
 
             if io.is_colab():
-                plist += [ (self.get_previews()[0][1], self.get_strpath_storage_for_file('preview.jpg') ) ]
+                previews = self.get_previews()
+                for i in range(len(previews)):
+                    name, bgr = previews[i]
+                    plist += [ (bgr, self.get_strpath_storage_for_file('preview_%s.jpg' % (name) ) ) ]
 
             if self.write_preview_history:
                 plist += [ (self.get_static_preview(), str (self.preview_history_path / ('%.6d.jpg' % (self.iter))) ) ]

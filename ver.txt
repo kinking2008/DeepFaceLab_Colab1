@@ -1,7 +1,27 @@
-DEL:20190421
-Build:20190421
-主要更新功能：Fanseg，遮挡物处理模型。
-注意：使用Liae结构的模型不在兼容！！！！
+﻿DEL:20190424
+Build:20190424
+
+
+== 04.24.2019 ==
+SAE: finally the collapses were fixed
+SAE: 崩溃的问题终于解决了
+
+added option 'Use CA weights? (y/n, ?:help skip: %s ) :
+添加 Use CA weights选项
+
+Initialize network with 'Convolution Aware' weights from paper https://arxiv.org/abs/1702.06295.
+使用Convolution Aware初始化权重，参考论文：https://arxiv.org/abs/1702.06295.
+
+This may help to achieve a higher accuracy model, but consumes a time at first run.
+这也许能够实现高精度模型，但是首次运行会比较慢。
+
+== 04.23.2019 ==
+SAE: training should be restarted
+SAE：模型必须重新训练
+
+remove option 'Remove gray border' because it makes the model very resource intensive.
+移除了Remove gray border选项，因为他会使得模型非常耗费资源。
+
 
 == 04.21.2019 ==
 
@@ -57,7 +77,7 @@ Result model\FANSeg_256_full_face.h5 should be placed to DeepFacelab\facelib\ fo
 Google Colab now works on Tesla T4 16GB.
 谷歌云笔记本现在的配置是Tesla T4 16GB
 With Google Colaboratory you can freely train your model for 12 hours per session, then reset session and continue with last save.
-你可以使用谷歌云笔记本训练模型，但是回话会最多只能持续12小时，然后环境会充值。
+你可以使用谷歌云笔记本训练模型，但是回话会最多只能持续12小时，然后环境会重置。
 
 == 04.07.2019 == 
 

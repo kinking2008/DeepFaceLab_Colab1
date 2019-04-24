@@ -10,7 +10,7 @@ from interact import interact as io
 from nnlib import nnlib
 
 """
-FANSegmentator is designed to segment faces aligned by 2DFAN-4 landmarks extractor.
+FANSegmentator is designed to exclude obstructions from faces such as hair, fingers, etc.
 
 Dataset used to train located in official DFL mega.nz folder
 https://mega.nz/#F!b9MzCK4B!zEAG9txu7uaRUjXz9PtBqg
@@ -26,7 +26,7 @@ class FANSegmentator(object):
 
         self.model = FANSegmentator.BuildModel(resolution, ngf=64)
 
-        if weights_file_root:
+        if weights_file_root is not None:
             weights_file_root = Path(weights_file_root)
         else:
             weights_file_root = Path(__file__).parent
@@ -50,7 +50,7 @@ class FANSegmentator(object):
 
         if training:
             #self.model.compile(loss='mse', optimizer=Adam(tf_cpu_mode=2))
-            self.model.compile(loss='binary_crossentropy', optimizer=Adam(tf_cpu_mode=2), metrics=['accuracy'])
+            self.model.compile(loss='binary_crossentropy', optimizer=Adam(tf_cpu_mode=2) )
             
     def __enter__(self):
         return self
