@@ -1,3 +1,6 @@
+# Good News
+Colab upgraded from the original K80 12G to T4 16G, faster, more VRAM！  
+
 # Overview
 The purpose of this project is to provide a way to run ***DeepFaceLab*** for free.  
 When you have learned how to use DFL, Perhaps the biggest limitation for you is the Computer performance.  
@@ -10,7 +13,7 @@ This rep just add the .ipynb file ,makes it simpler!
 No need to copy, zip, unzip multiple times, no need to worry about data loss. 
 
 # Features
-* You can use tesla k80 for free
+* You can use tesla T4 for free
 * Your data is saved in the google Drive
 * You can preview the results online,No need to download
 * Colaboratory requires interaction when in use. The system may stop long-running background calculations
