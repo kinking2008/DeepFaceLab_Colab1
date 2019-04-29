@@ -55,27 +55,28 @@ class SampleProcessor(object):
         IMG_TRANSFORMED                = 4
         IMG_LANDMARKS_ARRAY            = 5 #currently unused
         IMG_PITCH_YAW_ROLL             = 6
-        IMG_TYPE_END = 6
+        IMG_PITCH_YAW_ROLL_SIGMOID     = 7
+        IMG_TYPE_END = 10
         
-        FACE_TYPE_BEGIN = 7
-        FACE_TYPE_HALF             = 7
-        FACE_TYPE_FULL             = 8
-        FACE_TYPE_HEAD             = 9  #currently unused
-        FACE_TYPE_AVATAR           = 10  #currently unused
-        FACE_TYPE_END = 10
+        FACE_TYPE_BEGIN = 10
+        FACE_TYPE_HALF             = 10
+        FACE_TYPE_FULL             = 11
+        FACE_TYPE_HEAD             = 12  #currently unused
+        FACE_TYPE_AVATAR           = 13  #currently unused
+        FACE_TYPE_END = 20
         
-        FACE_MASK_BEGIN = 10
-        FACE_MASK_FULL             = 11
-        FACE_MASK_EYES             = 12 #currently unused
-        FACE_MASK_END = 12
+        FACE_MASK_BEGIN = 20
+        FACE_MASK_FULL             = 20
+        FACE_MASK_EYES             = 21 #currently unused
+        FACE_MASK_END = 30
         
-        MODE_BEGIN = 13
-        MODE_BGR                   = 13  #BGR
-        MODE_G                     = 14  #Grayscale
-        MODE_GGG                   = 15  #3xGrayscale
-        MODE_M                     = 16  #mask only
-        MODE_BGR_SHUFFLE           = 17  #BGR shuffle
-        MODE_END = 17
+        MODE_BEGIN = 40
+        MODE_BGR                   = 40  #BGR
+        MODE_G                     = 41  #Grayscale
+        MODE_GGG                   = 42  #3xGrayscale
+        MODE_M                     = 43  #mask only
+        MODE_BGR_SHUFFLE           = 44  #BGR shuffle
+        MODE_END = 50
         
     class Options(object):
 
@@ -98,12 +99,6 @@ class SampleProcessor(object):
 
         if debug and is_face_sample:
             LandmarksProcessor.draw_landmarks (sample_bgr, sample.landmarks, (0, 1, 0))
-
-        close_sample = sample.close_target_list[ np.random.randint(0, len(sample.close_target_list)) ] if sample.close_target_list is not None else None
-        close_sample_bgr = close_sample.load_bgr() if close_sample is not None else None
-
-        if debug and close_sample_bgr is not None:
-            LandmarksProcessor.draw_landmarks (close_sample_bgr, close_sample.landmarks, (0, 1, 0))
 
         params = imagelib.gen_warp_params(sample_bgr, sample_process_options.random_flip, rotation_range=sample_process_options.rotation_range, scale_range=sample_process_options.scale_range, tx_range=sample_process_options.tx_range, ty_range=sample_process_options.ty_range )
 
@@ -132,13 +127,13 @@ class SampleProcessor(object):
             face_mask_type = SPTF.NONE
             mode_type = SPTF.NONE
             for t in types:
-                if t >= SPTF.IMG_TYPE_BEGIN and t <= SPTF.IMG_TYPE_END:
+                if t >= SPTF.IMG_TYPE_BEGIN and t < SPTF.IMG_TYPE_END:
                     img_type = t
-                elif t >= SPTF.FACE_TYPE_BEGIN and t <= SPTF.FACE_TYPE_END:
+                elif t >= SPTF.FACE_TYPE_BEGIN and t < SPTF.FACE_TYPE_END:
                     target_face_type = t
-                elif t >= SPTF.FACE_MASK_BEGIN and t <= SPTF.FACE_MASK_END:
+                elif t >= SPTF.FACE_MASK_BEGIN and t < SPTF.FACE_MASK_END:
                     face_mask_type = t
-                elif t >= SPTF.MODE_BEGIN and t <= SPTF.MODE_END:
+                elif t >= SPTF.MODE_BEGIN and t < SPTF.MODE_END:
                     mode_type = t
                     
             if img_type == SPTF.NONE:
@@ -149,7 +144,7 @@ class SampleProcessor(object):
                 l = np.concatenate ( [ np.expand_dims(l[:,0] / w,-1), np.expand_dims(l[:,1] / h,-1) ], -1 )
                 l = np.clip(l, 0.0, 1.0)
                 img = l
-            elif img_type == SPTF.IMG_PITCH_YAW_ROLL:
+            elif img_type == SPTF.IMG_PITCH_YAW_ROLL or img_type == SPTF.IMG_PITCH_YAW_ROLL_SIGMOID:
                 pitch_yaw_roll = sample.pitch_yaw_roll
                 if pitch_yaw_roll is not None:
                     pitch, yaw, roll = pitch_yaw_roll
@@ -158,6 +153,11 @@ class SampleProcessor(object):
                 if params['flip']:
                     yaw = -yaw
                     
+                if img_type == SPTF.IMG_PITCH_YAW_ROLL_SIGMOID:
+                    pitch = (pitch+1.0) / 2.0
+                    yaw = (yaw+1.0) / 2.0
+                    roll = (roll+1.0) / 2.0
+                
                 img = (pitch, yaw, roll)                
             else:
                 if mode_type == SPTF.NONE:
@@ -265,7 +265,11 @@ class SampleProcessor(object):
             return outputs
 
 """
+        close_sample = sample.close_target_list[ np.random.randint(0, len(sample.close_target_list)) ] if sample.close_target_list is not None else None
+        close_sample_bgr = close_sample.load_bgr() if close_sample is not None else None
 
+        if debug and close_sample_bgr is not None:
+            LandmarksProcessor.draw_landmarks (close_sample_bgr, close_sample.landmarks, (0, 1, 0))
         RANDOM_CLOSE               = 0x00000040, #currently unused
         MORPH_TO_RANDOM_CLOSE      = 0x00000080, #currently unused
 
