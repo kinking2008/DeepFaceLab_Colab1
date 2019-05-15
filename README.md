@@ -17,7 +17,8 @@ No need to copy, zip, unzip multiple times, no need to worry about data loss.
 * Your data is saved in the google Drive
 * You can preview the results online,No need to download
 * Colaboratory requires interaction when in use. The system may stop long-running background calculations
-* Sometimes,The first load(train load) may be slower .
+* Loading images for the first time will be slower
+* Long time use may be blacked out, then you can only change a google account
   
   ![](https://github.com/dream80/DeepFaceLab_Colab/blob/master/doc/history.jpg?raw=true)  
 
