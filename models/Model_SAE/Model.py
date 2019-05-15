@@ -487,7 +487,7 @@ class SAEModel(ModelBase):
                                predictor_input_size=self.options['resolution'],
                                predictor_masked=self.options['learn_mask'],
                                face_type=face_type,
-                               default_mode = 1 if self.options['face_style_power'] or self.options['bg_style_power'] else 4,
+                               default_mode = 1 if self.options['apply_random_ct'] or self.options['face_style_power'] or self.options['bg_style_power'] else 4,
                                base_erode_mask_modifier=base_erode_mask_modifier,
                                base_blur_mask_modifier=base_blur_mask_modifier,
                                default_erode_mask_modifier=default_erode_mask_modifier,

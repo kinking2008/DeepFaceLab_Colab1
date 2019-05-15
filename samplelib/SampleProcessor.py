@@ -212,13 +212,11 @@ class SampleProcessor(object):
                 img_bgr  = img[...,0:3]
                 img_mask = img[...,3:4]
 
-                if apply_ct:
+                if apply_ct and ct_sample is not None:
                     if ct_sample_bgr is None:
                         ct_sample_bgr = ct_sample.load_bgr()
-                        ct_sample_mask = LandmarksProcessor.get_image_hull_mask (ct_sample_bgr.shape, ct_sample.landmarks)
 
                     ct_sample_bgr_resized = cv2.resize( ct_sample_bgr, (resolution,resolution), cv2.INTER_LINEAR )
-                    ct_sample_mask_resized = cv2.resize( ct_sample_mask, (resolution,resolution), cv2.INTER_LINEAR )[...,np.newaxis]
 
                     img_bgr = imagelib.linear_color_transfer (img_bgr, ct_sample_bgr_resized)
                     img_bgr = np.clip( img_bgr, 0.0, 1.0)
@@ -235,8 +233,7 @@ class SampleProcessor(object):
                     img = img_bgr
                 elif mode_type == SPTF.MODE_BGR_SHUFFLE:
                     rnd_state = np.random.RandomState (sample_rnd_seed)
-                    img_bgr = np.take (img_bgr, rnd_state.permutation(img_bgr.shape[-1]), axis=-1)
-                    img = np.concatenate ( (img_bgr,img_mask) , -1 )
+                    img = np.take (img_bgr, rnd_state.permutation(img_bgr.shape[-1]), axis=-1)
                 elif mode_type == SPTF.MODE_G:
                     img = np.concatenate ( (np.expand_dims(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY),-1),img_mask) , -1 )
                 elif mode_type == SPTF.MODE_GGG:
