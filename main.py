@@ -40,7 +40,7 @@ if __name__ == "__main__":
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--output-dir', required=True, action=fixPathAction, dest="output_dir", help="Output directory. This is where the extracted files will be stored.")
     p.add_argument('--debug-dir', action=fixPathAction, dest="debug_dir", help="Writes debug images to this directory.")
-    p.add_argument('--face-type', dest="face_type", choices=['half_face', 'full_face', 'head', 'avatar', 'mark_only'], default='full_face', help="Default 'full_face'. Don't change this option, currently all models uses 'full_face'")
+    p.add_argument('--face-type', dest="face_type", choices=['half_face', 'full_face', 'head', 'full_face_no_align', 'mark_only'], default='full_face', help="Default 'full_face'. Don't change this option, currently all models uses 'full_face'")
     p.add_argument('--detector', dest="detector", choices=['dlib','mt','s3fd','manual'], default='dlib', help="Type of detector. Default 'dlib'. 'mt' (MTCNNv1) - faster, better, almost no jitter, perfect for gathering thousands faces for src-set. It is also good for dst-set, but can generate false faces in frames where main face not recognized! In this case for dst-set use either 'dlib' with '--manual-fix' or '--detector manual'. Manual detector suitable only for dst-set.")
     p.add_argument('--multi-gpu', action="store_true", dest="multi_gpu", default=False, help="Enables multi GPU.")
     p.add_argument('--manual-fix', action="store_true", dest="manual_fix", default=False, help="Enables manual extract only frames where faces were not recognized.")
@@ -48,8 +48,8 @@ if __name__ == "__main__":
     p.add_argument('--manual-window-size', type=int, dest="manual_window_size", default=1368, help="Manual fix window size. Default: 1368.")
     p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Extract on CPU. Forces to use MT extractor.")
     p.set_defaults (func=process_extract)
-    
-    
+
+
     def process_dev_extract_umd_csv(arguments):
         os_utils.set_process_lowest_prio()
         from mainscripts import Extractor
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Extract on CPU.")
     p.set_defaults (func=process_extract_fanseg)
     """
-    
+
     def process_sort(arguments):
         os_utils.set_process_lowest_prio()
         from mainscripts import Sorter
@@ -103,17 +103,17 @@ if __name__ == "__main__":
 
         if arguments.recover_original_aligned_filename:
             Util.recover_original_aligned_filename (input_path=arguments.input_dir)
-            
+
         #if arguments.remove_fanseg:
         #    Util.remove_fanseg_folder (input_path=arguments.input_dir)
-            
+
     p = subparsers.add_parser( "util", help="Utilities.")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--convert-png-to-jpg', action="store_true", dest="convert_png_to_jpg", default=False, help="Convert DeepFaceLAB PNG files to JPEG.")
     p.add_argument('--add-landmarks-debug-images', action="store_true", dest="add_landmarks_debug_images", default=False, help="Add landmarks debug image for aligned faces.")
     p.add_argument('--recover-original-aligned-filename', action="store_true", dest="recover_original_aligned_filename", default=False, help="Recover original aligned filename.")
     #p.add_argument('--remove-fanseg', action="store_true", dest="remove_fanseg", default=False, help="Remove fanseg mask from aligned faces.")
-    
+
     p.set_defaults (func=process_util)
 
     def process_train(arguments):
@@ -151,10 +151,8 @@ if __name__ == "__main__":
         args = {'input_dir'   : arguments.input_dir,
                 'output_dir'  : arguments.output_dir,
                 'aligned_dir' : arguments.aligned_dir,
-                'avaperator_aligned_dir' : arguments.avaperator_aligned_dir,
                 'model_dir'   : arguments.model_dir,
                 'model_name'  : arguments.model_name,
-                'debug'       : arguments.debug,
                 }
         device_args = {'cpu_only'  : arguments.cpu_only,
                        'force_gpu_idx' : arguments.force_gpu_idx,
@@ -166,10 +164,8 @@ if __name__ == "__main__":
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--output-dir', required=True, action=fixPathAction, dest="output_dir", help="Output directory. This is where the converted files will be stored.")
     p.add_argument('--aligned-dir', action=fixPathAction, dest="aligned_dir", help="Aligned directory. This is where the extracted of dst faces stored.")
-    p.add_argument('--avaperator-aligned-dir', action=fixPathAction, dest="avaperator_aligned_dir", help="Only for AVATAR model. Directory of aligned avatar operator faces.")
     p.add_argument('--model-dir', required=True, action=fixPathAction, dest="model_dir", help="Model dir.")
     p.add_argument('--model', required=True, dest="model_name", choices=Path_utils.get_all_dir_names_startswith ( Path(__file__).parent / 'models' , 'Model_'), help="Type of model")
-    p.add_argument('--debug', action="store_true", dest="debug", default=False, help="Debug converter.")
     p.add_argument('--force-gpu-idx', type=int, dest="force_gpu_idx", default=-1, help="Force to choose this GPU idx.")
     p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Convert on CPU.")
     p.set_defaults(func=process_convert)
@@ -244,7 +240,7 @@ if __name__ == "__main__":
     p.add_argument('--confirmed-dir', required=True, action=fixPathAction, dest="confirmed_dir", help="This is where the labeled faces will be stored.")
     p.add_argument('--skipped-dir', required=True, action=fixPathAction, dest="skipped_dir", help="This is where the labeled faces will be stored.")
     p.set_defaults(func=process_labelingtool_edit_mask)
-    
+
     def bad_args(arguments):
         parser.print_help()
         exit(0)

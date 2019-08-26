@@ -9,25 +9,96 @@ from mathlib.umeyama import umeyama
 from facelib import FaceType
 import math
 
-mean_face_x = np.array([
-0.000213256, 0.0752622, 0.18113, 0.29077, 0.393397, 0.586856, 0.689483, 0.799124,
-0.904991, 0.98004, 0.490127, 0.490127, 0.490127, 0.490127, 0.36688, 0.426036,
-0.490127, 0.554217, 0.613373, 0.121737, 0.187122, 0.265825, 0.334606, 0.260918,
-0.182743, 0.645647, 0.714428, 0.793132, 0.858516, 0.79751, 0.719335, 0.254149,
-0.340985, 0.428858, 0.490127, 0.551395, 0.639268, 0.726104, 0.642159, 0.556721,
-0.490127, 0.423532, 0.338094, 0.290379, 0.428096, 0.490127, 0.552157, 0.689874,
-0.553364, 0.490127, 0.42689 ])
-
-mean_face_y = np.array([
-0.106454, 0.038915, 0.0187482, 0.0344891, 0.0773906, 0.0773906, 0.0344891,
-0.0187482, 0.038915, 0.106454, 0.203352, 0.307009, 0.409805, 0.515625, 0.587326,
-0.609345, 0.628106, 0.609345, 0.587326, 0.216423, 0.178758, 0.179852, 0.231733,
-0.245099, 0.244077, 0.231733, 0.179852, 0.178758, 0.216423, 0.244077, 0.245099,
-0.780233, 0.745405, 0.727388, 0.742578, 0.727388, 0.745405, 0.780233, 0.864805,
-0.902192, 0.909281, 0.902192, 0.864805, 0.784792, 0.778746, 0.785343, 0.778746,
-0.784792, 0.824182, 0.831803, 0.824182 ])
-
-landmarks_2D = np.stack( [ mean_face_x, mean_face_y ], axis=1 )
+landmarks_2D = np.array([
+[ 0.000213256,  0.106454  ], #17
+[ 0.0752622,    0.038915  ], #18
+[ 0.18113,      0.0187482 ], #19
+[ 0.29077,      0.0344891 ], #20
+[ 0.393397,     0.0773906 ], #21
+[ 0.586856,     0.0773906 ], #22
+[ 0.689483,     0.0344891 ], #23
+[ 0.799124,     0.0187482 ], #24
+[ 0.904991,     0.038915  ], #25
+[ 0.98004,      0.106454  ], #26
+[ 0.490127,     0.203352  ], #27
+[ 0.490127,     0.307009  ], #28
+[ 0.490127,     0.409805  ], #29
+[ 0.490127,     0.515625  ], #30
+[ 0.36688,      0.587326  ], #31
+[ 0.426036,     0.609345  ], #32
+[ 0.490127,     0.628106  ], #33
+[ 0.554217,     0.609345  ], #34
+[ 0.613373,     0.587326  ], #35
+[ 0.121737,     0.216423  ], #36
+[ 0.187122,     0.178758  ], #37
+[ 0.265825,     0.179852  ], #38
+[ 0.334606,     0.231733  ], #39
+[ 0.260918,     0.245099  ], #40
+[ 0.182743,     0.244077  ], #41
+[ 0.645647,     0.231733  ], #42
+[ 0.714428,     0.179852  ], #43
+[ 0.793132,     0.178758  ], #44
+[ 0.858516,     0.216423  ], #45
+[ 0.79751,      0.244077  ], #46
+[ 0.719335,     0.245099  ], #47
+[ 0.254149,     0.780233  ], #48
+[ 0.340985,     0.745405  ], #49
+[ 0.428858,     0.727388  ], #50
+[ 0.490127,     0.742578  ], #51
+[ 0.551395,     0.727388  ], #52
+[ 0.639268,     0.745405  ], #53
+[ 0.726104,     0.780233  ], #54
+[ 0.642159,     0.864805  ], #55
+[ 0.556721,     0.902192  ], #56
+[ 0.490127,     0.909281  ], #57
+[ 0.423532,     0.902192  ], #58
+[ 0.338094,     0.864805  ], #59
+[ 0.290379,     0.784792  ], #60
+[ 0.428096,     0.778746  ], #61
+[ 0.490127,     0.785343  ], #62
+[ 0.552157,     0.778746  ], #63
+[ 0.689874,     0.784792  ], #64
+[ 0.553364,     0.824182  ], #65
+[ 0.490127,     0.831803  ], #66
+[ 0.42689 ,     0.824182  ]  #67
+], dtype=np.float32)                        
+             
+            
+landmarks_2D_new = np.array([
+[ 0.000213256,  0.106454  ], #17
+[ 0.0752622,    0.038915  ], #18
+[ 0.18113,      0.0187482 ], #19
+[ 0.29077,      0.0344891 ], #20
+[ 0.393397,     0.0773906 ], #21
+[ 0.586856,     0.0773906 ], #22
+[ 0.689483,     0.0344891 ], #23
+[ 0.799124,     0.0187482 ], #24
+[ 0.904991,     0.038915  ], #25
+[ 0.98004,      0.106454  ], #26
+[ 0.490127,     0.203352  ], #27
+[ 0.490127,     0.307009  ], #28
+[ 0.490127,     0.409805  ], #29
+[ 0.490127,     0.515625  ], #30
+[ 0.36688,      0.587326  ], #31
+[ 0.426036,     0.609345  ], #32
+[ 0.490127,     0.628106  ], #33
+[ 0.554217,     0.609345  ], #34
+[ 0.613373,     0.587326  ], #35
+[ 0.121737,     0.216423  ], #36
+[ 0.187122,     0.178758  ], #37
+[ 0.265825,     0.179852  ], #38
+[ 0.334606,     0.231733  ], #39
+[ 0.260918,     0.245099  ], #40
+[ 0.182743,     0.244077  ], #41
+[ 0.645647,     0.231733  ], #42
+[ 0.714428,     0.179852  ], #43
+[ 0.793132,     0.178758  ], #44
+[ 0.858516,     0.216423  ], #45
+[ 0.79751,      0.244077  ], #46
+[ 0.719335,     0.245099  ], #47
+[ 0.254149,     0.780233  ], #48
+[ 0.726104,     0.780233  ], #54
+], dtype=np.float32)                  
 
 # 68 point landmark definitions
 landmarks_68_pt = { "mouth": (48,68),
@@ -109,10 +180,19 @@ landmarks_68_3D = np.array( [
 [0.205322    , 31.408738    , -21.903670  ],
 [-7.198266   , 30.844876    , -20.328022  ] ], dtype=np.float32)
 
+def transform_points(points, mat, invert=False):
+    if invert:
+        mat = cv2.invertAffineTransform (mat)
+    points = np.expand_dims(points, axis=1)
+    points = cv2.transform(points, mat, points.shape)
+    points = np.squeeze(points)
+    return points
+
 def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
     if not isinstance(image_landmarks, np.ndarray):
         image_landmarks = np.array (image_landmarks)
 
+    """
     if face_type == FaceType.AVATAR:
         centroid = np.mean (image_landmarks, axis=0)
 
@@ -128,76 +208,84 @@ def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
         mat = mat * scale * (output_size / 3)
         mat[:,2] += output_size / 2
     else:
-        if face_type == FaceType.HALF:
-            padding = 0
-        elif face_type == FaceType.FULL:
-            padding = (output_size / 64) * 12
-        elif face_type == FaceType.HEAD:
-            padding = (output_size / 64) * 24
-        else:
-            raise ValueError ('wrong face_type: ', face_type)
+    """
+    remove_align = False
+    if face_type == FaceType.FULL_NO_ALIGN:
+        face_type = FaceType.FULL
+        remove_align = True
+    elif face_type == FaceType.HEAD_NO_ALIGN:
+        face_type = FaceType.HEAD
+        remove_align = True
 
-        mat = umeyama(image_landmarks[17:], landmarks_2D, True)[0:2]
-        mat = mat * (output_size - 2 * padding)
-        mat[:,2] += padding
-        mat *= (1 / scale)
-        mat[:,2] += -output_size*( ( (1 / scale) - 1.0 ) / 2 )
+    if face_type == FaceType.HALF:
+        padding = 0
+    elif face_type == FaceType.FULL:
+        padding = (output_size / 64) * 12
+    elif face_type == FaceType.HEAD:
+        padding = (output_size / 64) * 21
+    else:
+        raise ValueError ('wrong face_type: ', face_type)
+
+    #mat = umeyama(image_landmarks[17:], landmarks_2D, True)[0:2]
+    mat = umeyama( np.concatenate ( [ image_landmarks[17:49] , image_landmarks[54:55] ] ) , landmarks_2D_new, True)[0:2]
+    
+    mat = mat * (output_size - 2 * padding)
+    mat[:,2] += padding
+    mat *= (1 / scale)
+    mat[:,2] += -output_size*( ( (1 / scale) - 1.0 ) / 2 )
+
+    if remove_align:
+        bbox = transform_points ( [ (0,0), (0,output_size-1), (output_size-1, output_size-1), (output_size-1,0) ], mat, True)
+        area = mathlib.polygon_area(bbox[:,0], bbox[:,1] )
+        side = math.sqrt(area) / 2
+        center = transform_points ( [(output_size/2,output_size/2)], mat, True)
+
+        pts1 = np.float32([ center+[-side,-side], center+[side,-side], center+[-side,side] ])
+        pts2 = np.float32([[0,0],[output_size-1,0],[0,output_size-1]])
+        mat = cv2.getAffineTransform(pts1,pts2)
 
     return mat
-
-def transform_points(points, mat, invert=False):
-    if invert:
-        mat = cv2.invertAffineTransform (mat)
-    points = np.expand_dims(points, axis=1)
-    points = cv2.transform(points, mat, points.shape)
-    points = np.squeeze(points)
-    return points
-
 
 def get_image_hull_mask (image_shape, image_landmarks, ie_polys=None):
     if len(image_landmarks) != 68:
         raise Exception('get_image_hull_mask works only with 68 landmarks')
-    int_lmrks = np.array(image_landmarks, dtype=np.int)
+    int_lmrks = np.array(image_landmarks.copy(), dtype=np.int)
 
     hull_mask = np.zeros(image_shape[0:2]+(1,),dtype=np.float32)
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[0:9],
-                              int_lmrks[17:18]))) , (1,)  )
+    # #nose
+    ml_pnt = (int_lmrks[36] + int_lmrks[0]) // 2
+    mr_pnt = (int_lmrks[16] + int_lmrks[45]) // 2
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[8:17],
-                              int_lmrks[26:27]))) , (1,)  )
+    # mid points between the mid points and eye
+    ql_pnt = (int_lmrks[36] + ml_pnt) // 2
+    qr_pnt = (int_lmrks[45] + mr_pnt) // 2
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[17:20],
-                              int_lmrks[8:9]))) , (1,)  )
+    # Top of the eye arrays
+    bot_l = np.array((ql_pnt, int_lmrks[36], int_lmrks[37], int_lmrks[38], int_lmrks[39]))
+    bot_r = np.array((int_lmrks[42], int_lmrks[43], int_lmrks[44], int_lmrks[45], qr_pnt))
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[24:27],
-                              int_lmrks[8:9]))) , (1,)  )
+    # Eyebrow arrays
+    top_l = int_lmrks[17:22]
+    top_r = int_lmrks[22:27]
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[19:25],
-                              int_lmrks[8:9],
-                              ))) , (1,)  )
+    # Adjust eyebrow arrays
+    int_lmrks[17:22] = top_l + ((top_l - bot_l) // 2)
+    int_lmrks[22:27] = top_r + ((top_r - bot_r) // 2)
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[17:22],
-                              int_lmrks[27:28],
-                              int_lmrks[31:36],
-                              int_lmrks[8:9]
-                              ))) , (1,)  )
+    r_jaw = (int_lmrks[0:9], int_lmrks[17:18])
+    l_jaw = (int_lmrks[8:17], int_lmrks[26:27])
+    r_cheek = (int_lmrks[17:20], int_lmrks[8:9])
+    l_cheek = (int_lmrks[24:27], int_lmrks[8:9])
+    nose_ridge = (int_lmrks[19:25], int_lmrks[8:9],)
+    r_eye = (int_lmrks[17:22], int_lmrks[27:28], int_lmrks[31:36], int_lmrks[8:9])
+    l_eye = (int_lmrks[22:27], int_lmrks[27:28], int_lmrks[31:36], int_lmrks[8:9])
+    nose = (int_lmrks[27:31], int_lmrks[31:36])
+    parts = [r_jaw, l_jaw, r_cheek, l_cheek, nose_ridge, r_eye, l_eye, nose]
 
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(
-            np.concatenate ( (int_lmrks[22:27],
-                              int_lmrks[27:28],
-                              int_lmrks[31:36],
-                              int_lmrks[8:9]
-                              ))) , (1,)  )
-
-    #nose
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull(int_lmrks[27:36]), (1,) )
+    for item in parts:
+        merged = np.concatenate(item)
+        cv2.fillConvexPoly(hull_mask, cv2.convexHull(merged), 1)
 
     if ie_polys is not None:
         ie_polys.overlay_mask(hull_mask)
@@ -309,7 +397,7 @@ def draw_landmarks (image, image_landmarks, color=(0,255,0), transparent_mask=Fa
         mask = get_image_hull_mask (image.shape, image_landmarks, ie_polys)
         image[...] = ( image * (1-mask) + image * mask / 2 )[...]
 
-def draw_rect_landmarks (image, rect, image_landmarks, face_size, face_type, transparent_mask=False, ie_polys=None, landmarks_color=(0,255,0) ):
+def draw_rect_landmarks (image, rect, image_landmarks, face_size, face_type, transparent_mask=False, ie_polys=None, landmarks_color=(0,255,0)):
     draw_landmarks(image, image_landmarks, color=landmarks_color, transparent_mask=transparent_mask, ie_polys=ie_polys)
     imagelib.draw_rect (image, rect, (255,0,0), 2 )
 
