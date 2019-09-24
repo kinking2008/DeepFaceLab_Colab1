@@ -49,7 +49,21 @@ if __name__ == "__main__":
     p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Extract on CPU. Forces to use MT extractor.")
     p.set_defaults (func=process_extract)
 
+    def process_dev_extract_vggface2_dataset(arguments):
+        os_utils.set_process_lowest_prio()
+        from mainscripts import dev_misc
+        dev_misc.extract_vggface2_dataset( arguments.input_dir,
+                                            device_args={'cpu_only'  : arguments.cpu_only,
+                                                        'multi_gpu' : arguments.multi_gpu,
+                                                        }
+                                            )
 
+    p = subparsers.add_parser( "dev_extract_vggface2_dataset", help="")
+    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
+    p.add_argument('--multi-gpu', action="store_true", dest="multi_gpu", default=False, help="Enables multi GPU.")
+    p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Extract on CPU.")
+    p.set_defaults (func=process_dev_extract_vggface2_dataset)
+    
     def process_dev_extract_umd_csv(arguments):
         os_utils.set_process_lowest_prio()
         from mainscripts import Extractor
@@ -106,13 +120,17 @@ if __name__ == "__main__":
 
         #if arguments.remove_fanseg:
         #    Util.remove_fanseg_folder (input_path=arguments.input_dir)
-
+        
+        if arguments.remove_ie_polys:
+            Util.remove_ie_polys_folder (input_path=arguments.input_dir)
+        
     p = subparsers.add_parser( "util", help="Utilities.")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--convert-png-to-jpg', action="store_true", dest="convert_png_to_jpg", default=False, help="Convert DeepFaceLAB PNG files to JPEG.")
     p.add_argument('--add-landmarks-debug-images', action="store_true", dest="add_landmarks_debug_images", default=False, help="Add landmarks debug image for aligned faces.")
     p.add_argument('--recover-original-aligned-filename', action="store_true", dest="recover_original_aligned_filename", default=False, help="Recover original aligned filename.")
     #p.add_argument('--remove-fanseg', action="store_true", dest="remove_fanseg", default=False, help="Remove fanseg mask from aligned faces.")
+    p.add_argument('--remove-ie-polys', action="store_true", dest="remove_ie_polys", default=False, help="Remove ie_polys from aligned faces.")
 
     p.set_defaults (func=process_util)
 
@@ -148,7 +166,8 @@ if __name__ == "__main__":
 
     def process_convert(arguments):
         os_utils.set_process_lowest_prio()
-        args = {'input_dir'   : arguments.input_dir,
+        args = {'training_data_src_dir' : arguments.training_data_src_dir,
+                'input_dir'   : arguments.input_dir,
                 'output_dir'  : arguments.output_dir,
                 'aligned_dir' : arguments.aligned_dir,
                 'model_dir'   : arguments.model_dir,
@@ -161,6 +180,7 @@ if __name__ == "__main__":
         Converter.main (args, device_args)
 
     p = subparsers.add_parser( "convert", help="Converter")
+    p.add_argument('--training-data-src-dir', action=fixPathAction, dest="training_data_src_dir", help="(optional, may be required by some models) Dir of extracted SRC faceset.")    
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--output-dir', required=True, action=fixPathAction, dest="output_dir", help="Output directory. This is where the converted files will be stored.")
     p.add_argument('--aligned-dir', action=fixPathAction, dest="aligned_dir", help="Aligned directory. This is where the extracted of dst faces stored.")
@@ -232,13 +252,15 @@ if __name__ == "__main__":
 
     def process_labelingtool_edit_mask(arguments):
         from mainscripts import MaskEditorTool
-        MaskEditorTool.mask_editor_main (arguments.input_dir, arguments.confirmed_dir, arguments.skipped_dir)
+        MaskEditorTool.mask_editor_main (arguments.input_dir, arguments.confirmed_dir, arguments.skipped_dir, no_default_mask=arguments.no_default_mask)
 
     labeling_parser = subparsers.add_parser( "labelingtool", help="Labeling tool.").add_subparsers()
     p = labeling_parser.add_parser ( "edit_mask", help="")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory of aligned faces.")
     p.add_argument('--confirmed-dir', required=True, action=fixPathAction, dest="confirmed_dir", help="This is where the labeled faces will be stored.")
     p.add_argument('--skipped-dir', required=True, action=fixPathAction, dest="skipped_dir", help="This is where the labeled faces will be stored.")
+    p.add_argument('--no-default-mask', action="store_true", dest="no_default_mask", default=False, help="Don't use default mask.")
+    
     p.set_defaults(func=process_labelingtool_edit_mask)
 
     def bad_args(arguments):

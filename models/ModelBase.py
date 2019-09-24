@@ -23,7 +23,7 @@ You can implement your own model. Check examples.
 class ModelBase(object):
 
 
-    def __init__(self, model_path, training_data_src_path=None, training_data_dst_path=None, pretraining_data_path=None, debug = False, device_args = None,
+    def __init__(self, model_path, training_data_src_path=None, training_data_dst_path=None, pretraining_data_path=None, is_training=False, debug = False, device_args = None,
                  ask_enable_autobackup=True,
                  ask_write_preview_history=True,
                  ask_target_iter=True,
@@ -56,14 +56,8 @@ class ModelBase(object):
         self.training_data_dst_path = training_data_dst_path
         self.pretraining_data_path = pretraining_data_path
 
-        self.src_images_paths = None
-        self.dst_images_paths = None
-        self.src_yaw_images_paths = None
-        self.dst_yaw_images_paths = None
-        self.src_data_generator = None
-        self.dst_data_generator = None
         self.debug = debug
-        self.is_training_mode = (training_data_src_path is not None and training_data_dst_path is not None)
+        self.is_training_mode = is_training
 
         self.iter = 0
         self.options = {}
@@ -117,9 +111,9 @@ class ModelBase(object):
 
         if ask_batch_size and (self.iter == 0 or ask_override):
             default_batch_size = 0 if self.iter == 0 else self.options.get('batch_size',0)
-            self.options['batch_size'] = max(0, io.input_int("Batch_size (?:help skip:%d) : " % (default_batch_size), default_batch_size, help_message="Larger batch size is better for NN's generalization, but it can cause Out of Memory error. Tune this value for your videocard manually."))
+            self.batch_size = max(0, io.input_int("Batch_size (?:help skip:%d) : " % (default_batch_size), default_batch_size, help_message="Larger batch size is better for NN's generalization, but it can cause Out of Memory error. Tune this value for your videocard manually."))
         else:
-            self.options['batch_size'] = self.options.get('batch_size', 0)
+            self.batch_size = self.options.get('batch_size', 0)
 
         if ask_sort_by_yaw:
             if (self.iter == 0 or ask_override):
@@ -152,7 +146,7 @@ class ModelBase(object):
         if self.target_iter == 0 and 'target_iter' in self.options:
             self.options.pop('target_iter')
 
-        self.batch_size = self.options.get('batch_size',0)
+        #self.batch_size = self.options.get('batch_size',0)
         self.sort_by_yaw = self.options.get('sort_by_yaw',False)
         self.random_flip = self.options.get('random_flip',True)
 
@@ -204,6 +198,7 @@ class ModelBase(object):
 
             if self.sample_for_preview is None or choose_preview_history:
                 if choose_preview_history and io.is_support_windows():
+                    io.log_info ("Choose image for the preview history. [p] - next. [enter] - confirm.")
                     wnd_name = "[p] - next. [enter] - confirm."
                     io.named_window(wnd_name)
                     io.capture_keys(wnd_name)
@@ -325,13 +320,8 @@ class ModelBase(object):
 
     #overridable
     def get_ConverterConfig(self):
-        #return ConverterConfig() for the model
+        #return predictor_func, predictor_input_shape, ConverterConfig() for the model
         raise NotImplementedError
-
-    #overridable
-    def get_converter(self):
-        raise NotImplementedError
-        #return existing or your own converter which derived from base
 
     def get_target_iter(self):
         return self.target_iter
@@ -416,33 +406,60 @@ class ModelBase(object):
                             cv2_imwrite (filepath, img )
 
     def load_weights_safe(self, model_filename_list, optimizer_filename_list=[]):
-        for model, filename in model_filename_list:
+        exec(nnlib.code_import_all, locals(), globals())
+        
+        loaded = []
+        not_loaded = []
+        for mf in model_filename_list:
+            model, filename = mf
             filename = self.get_strpath_storage_for_file(filename)
+            
             if Path(filename).exists():
-                model.load_weights(filename)
-
-        if len(optimizer_filename_list) != 0:
-            opt_filename = self.get_strpath_storage_for_file('opt.h5')
-            if Path(opt_filename).exists():
-                try:
-                    with open(opt_filename, "rb") as f:
-                        d = pickle.loads(f.read())
-
-                    for x in optimizer_filename_list:
-                        opt, filename = x
-                        if filename in d:
-                            weights = d[filename].get('weights', None)
-                            if weights:
-                                opt.set_weights(weights)
-                                print("set ok")
-                except Exception as e:
-                    print ("Unable to load ", opt_filename)
-
+                loaded += [ mf ]
+                
+                if issubclass(model.__class__, keras.optimizers.Optimizer):
+                    opt = model
+  
+                    try:
+                        with open(filename, "rb") as f:
+                            fd = pickle.loads(f.read())
+                        
+                        weights = fd.get('weights', None)
+                        if weights is not None:
+                            opt.set_weights(weights)
+                            
+                    except Exception as e:
+                        print ("Unable to load ", filename)
+                        
+                else:
+                    model.load_weights(filename)
+            else:
+                not_loaded += [ mf ]
+                
+                   
+        return loaded, not_loaded
 
     def save_weights_safe(self, model_filename_list):
+        exec(nnlib.code_import_all, locals(), globals())
+        
         for model, filename in model_filename_list:
-            filename = self.get_strpath_storage_for_file(filename)
-            model.save_weights( filename + '.tmp' )
+            filename = self.get_strpath_storage_for_file(filename) + '.tmp'
+
+            if issubclass(model.__class__, keras.optimizers.Optimizer):
+                opt = model
+                
+                try:                    
+                    fd = {}
+                    symbolic_weights = getattr(opt, 'weights')
+                    if symbolic_weights:
+                        fd['weights'] = self.K.batch_get_value(symbolic_weights)
+
+                    with open(filename, 'wb') as f:
+                        f.write( pickle.dumps(fd) )
+                except Exception as e:
+                    print ("Unable to save ", filename)                
+            else:                
+                model.save_weights( filename)
 
         rename_list = model_filename_list
 

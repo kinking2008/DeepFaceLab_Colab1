@@ -1,13 +1,16 @@
 import colorsys
+import math
+from enum import IntEnum
+
 import cv2
 import numpy as np
-from enum import IntEnum
-import mathlib
+import numpy.linalg as npla
+
 import imagelib
+import mathlib
+from facelib import FaceType
 from imagelib import IEPolys
 from mathlib.umeyama import umeyama
-from facelib import FaceType
-import math
 
 landmarks_2D = np.array([
 [ 0.000213256,  0.106454  ], #17
@@ -61,9 +64,9 @@ landmarks_2D = np.array([
 [ 0.553364,     0.824182  ], #65
 [ 0.490127,     0.831803  ], #66
 [ 0.42689 ,     0.824182  ]  #67
-], dtype=np.float32)                        
-             
-            
+], dtype=np.float32)
+
+
 landmarks_2D_new = np.array([
 [ 0.000213256,  0.106454  ], #17
 [ 0.0752622,    0.038915  ], #18
@@ -98,7 +101,7 @@ landmarks_2D_new = np.array([
 [ 0.719335,     0.245099  ], #47
 [ 0.254149,     0.780233  ], #48
 [ 0.726104,     0.780233  ], #54
-], dtype=np.float32)                  
+], dtype=np.float32)
 
 # 68 point landmark definitions
 landmarks_68_pt = { "mouth": (48,68),
@@ -180,6 +183,55 @@ landmarks_68_3D = np.array( [
 [0.205322    , 31.408738    , -21.903670  ],
 [-7.198266   , 30.844876    , -20.328022  ] ], dtype=np.float32)
 
+def convert_98_to_68(lmrks):
+    #jaw
+    result = [ lmrks[0] ]
+    for i in range(2,16,2):
+        result += [ ( lmrks[i] + (lmrks[i-1]+lmrks[i+1])/2 ) / 2  ]
+    result += [ lmrks[16] ]
+    for i in range(18,32,2):
+        result += [ ( lmrks[i] + (lmrks[i-1]+lmrks[i+1])/2 ) / 2  ]
+    result += [ lmrks[32] ]
+
+    #eyebrows averaging
+    result += [ lmrks[33],
+                (lmrks[34]+lmrks[41])/2,
+                (lmrks[35]+lmrks[40])/2,
+                (lmrks[36]+lmrks[39])/2,
+                (lmrks[37]+lmrks[38])/2,
+              ]
+
+    result += [ (lmrks[42]+lmrks[50])/2,
+                (lmrks[43]+lmrks[49])/2,
+                (lmrks[44]+lmrks[48])/2,
+                (lmrks[45]+lmrks[47])/2,
+                lmrks[46]
+              ]
+
+    #nose
+    result += list ( lmrks[51:60] )
+
+    #left eye (from our view)
+    result += [ lmrks[60],
+                lmrks[61],
+                lmrks[63],
+                lmrks[64],
+                lmrks[65],
+                lmrks[67] ]
+
+    #right eye
+    result += [ lmrks[68],
+                lmrks[69],
+                lmrks[71],
+                lmrks[72],
+                lmrks[73],
+                lmrks[75] ]
+
+    #mouth
+    result += list ( lmrks[76:96] )
+
+    return np.concatenate (result).reshape ( (68,2) )
+
 def transform_points(points, mat, invert=False):
     if invert:
         mat = cv2.invertAffineTransform (mat)
@@ -228,7 +280,7 @@ def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
 
     #mat = umeyama(image_landmarks[17:], landmarks_2D, True)[0:2]
     mat = umeyama( np.concatenate ( [ image_landmarks[17:49] , image_landmarks[54:55] ] ) , landmarks_2D_new, True)[0:2]
-    
+
     mat = mat * (output_size - 2 * padding)
     mat[:,2] += padding
     mat *= (1 / scale)
@@ -246,51 +298,223 @@ def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
 
     return mat
 
-def get_image_hull_mask (image_shape, image_landmarks, ie_polys=None):
-    if len(image_landmarks) != 68:
-        raise Exception('get_image_hull_mask works only with 68 landmarks')
-    int_lmrks = np.array(image_landmarks.copy(), dtype=np.int)
-
-    hull_mask = np.zeros(image_shape[0:2]+(1,),dtype=np.float32)
+def expand_eyebrows(lmrks, eyebrows_expand_mod=1.0):
+    if len(lmrks) != 68:
+        raise Exception('works only with 68 landmarks')
+    lmrks = np.array( lmrks.copy(), dtype=np.int )
 
     # #nose
-    ml_pnt = (int_lmrks[36] + int_lmrks[0]) // 2
-    mr_pnt = (int_lmrks[16] + int_lmrks[45]) // 2
+    ml_pnt = (lmrks[36] + lmrks[0]) // 2
+    mr_pnt = (lmrks[16] + lmrks[45]) // 2
 
     # mid points between the mid points and eye
-    ql_pnt = (int_lmrks[36] + ml_pnt) // 2
-    qr_pnt = (int_lmrks[45] + mr_pnt) // 2
+    ql_pnt = (lmrks[36] + ml_pnt) // 2
+    qr_pnt = (lmrks[45] + mr_pnt) // 2
 
     # Top of the eye arrays
-    bot_l = np.array((ql_pnt, int_lmrks[36], int_lmrks[37], int_lmrks[38], int_lmrks[39]))
-    bot_r = np.array((int_lmrks[42], int_lmrks[43], int_lmrks[44], int_lmrks[45], qr_pnt))
+    bot_l = np.array((ql_pnt, lmrks[36], lmrks[37], lmrks[38], lmrks[39]))
+    bot_r = np.array((lmrks[42], lmrks[43], lmrks[44], lmrks[45], qr_pnt))
 
     # Eyebrow arrays
-    top_l = int_lmrks[17:22]
-    top_r = int_lmrks[22:27]
+    top_l = lmrks[17:22]
+    top_r = lmrks[22:27]
 
     # Adjust eyebrow arrays
-    int_lmrks[17:22] = top_l + ((top_l - bot_l) // 2)
-    int_lmrks[22:27] = top_r + ((top_r - bot_r) // 2)
+    lmrks[17:22] = top_l + eyebrows_expand_mod * 0.5 * (top_l - bot_l)
+    lmrks[22:27] = top_r + eyebrows_expand_mod * 0.5 * (top_r - bot_r)
+    return lmrks
 
-    r_jaw = (int_lmrks[0:9], int_lmrks[17:18])
-    l_jaw = (int_lmrks[8:17], int_lmrks[26:27])
-    r_cheek = (int_lmrks[17:20], int_lmrks[8:9])
-    l_cheek = (int_lmrks[24:27], int_lmrks[8:9])
-    nose_ridge = (int_lmrks[19:25], int_lmrks[8:9],)
-    r_eye = (int_lmrks[17:22], int_lmrks[27:28], int_lmrks[31:36], int_lmrks[8:9])
-    l_eye = (int_lmrks[22:27], int_lmrks[27:28], int_lmrks[31:36], int_lmrks[8:9])
-    nose = (int_lmrks[27:31], int_lmrks[31:36])
+
+
+
+def get_image_hull_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, ie_polys=None, color=(1,) ):
+    hull_mask = np.zeros(image_shape[0:2]+( len(color),),dtype=np.float32)
+
+    lmrks = expand_eyebrows(image_landmarks, eyebrows_expand_mod)
+
+    r_jaw = (lmrks[0:9], lmrks[17:18])
+    l_jaw = (lmrks[8:17], lmrks[26:27])
+    r_cheek = (lmrks[17:20], lmrks[8:9])
+    l_cheek = (lmrks[24:27], lmrks[8:9])
+    nose_ridge = (lmrks[19:25], lmrks[8:9],)
+    r_eye = (lmrks[17:22], lmrks[27:28], lmrks[31:36], lmrks[8:9])
+    l_eye = (lmrks[22:27], lmrks[27:28], lmrks[31:36], lmrks[8:9])
+    nose = (lmrks[27:31], lmrks[31:36])
     parts = [r_jaw, l_jaw, r_cheek, l_cheek, nose_ridge, r_eye, l_eye, nose]
 
     for item in parts:
         merged = np.concatenate(item)
-        cv2.fillConvexPoly(hull_mask, cv2.convexHull(merged), 1)
+        cv2.fillConvexPoly(hull_mask, cv2.convexHull(merged), color )
 
     if ie_polys is not None:
         ie_polys.overlay_mask(hull_mask)
 
     return hull_mask
+
+def alpha_to_color (img_alpha, color):
+    if len(img_alpha.shape) == 2:
+        img_alpha = img_alpha[...,None]
+    h,w,c = img_alpha.shape
+    result = np.zeros( (h,w, len(color) ), dtype=np.float32 )
+    result[:,:] = color
+
+    return result * img_alpha
+
+
+
+def get_cmask (image_shape, lmrks, eyebrows_expand_mod=1.0):
+    h,w,c = image_shape
+
+    hull = get_image_hull_mask (image_shape, lmrks, eyebrows_expand_mod, color=(1,) )
+
+    result = np.zeros( (h,w,3), dtype=np.float32 )
+
+
+
+    def process(w,h, data ):
+        d = {}
+        cur_lc = 0
+        all_lines = []
+        for s, pts_loop_ar in data:
+            lines = []
+            for pts, loop in pts_loop_ar:
+                pts_len = len(pts)
+                lines.append ( [ [ pts[i], pts[(i+1) % pts_len ] ]  for i in range(pts_len - (0 if loop else 1) ) ] )
+            lines = np.concatenate (lines)
+
+            lc = lines.shape[0]
+            all_lines.append(lines)
+            d[s] = cur_lc, cur_lc+lc
+            cur_lc += lc
+        all_lines = np.concatenate (all_lines, 0)
+
+        #calculate signed distance for all points and lines
+        line_count = all_lines.shape[0]
+        pts_count = w*h
+
+        all_lines = np.repeat ( all_lines[None,...], pts_count, axis=0 ).reshape ( (pts_count*line_count,2,2) )
+
+        pts = np.empty( (h,w,line_count,2), dtype=np.float32 )
+        pts[...,1] = np.arange(h)[:,None,None]
+        pts[...,0] = np.arange(w)[:,None]
+        pts = pts.reshape ( (h*w*line_count, -1) )
+
+        a = all_lines[:,0,:]
+        b = all_lines[:,1,:]
+        pa = pts-a
+        ba = b-a
+        ph = np.clip ( np.einsum('ij,ij->i', pa, ba) / np.einsum('ij,ij->i', ba, ba), 0, 1 )
+        dists = npla.norm ( pa - ba*ph[...,None], axis=1).reshape ( (h,w,line_count) )
+
+        def get_dists(name, thickness=0):
+            s,e = d[name]
+            result = dists[...,s:e]
+            if thickness != 0:
+                result = np.abs(result)-thickness
+            return np.min (result, axis=-1)
+
+        return get_dists
+
+    l_eye = lmrks[42:48]
+    r_eye = lmrks[36:42]
+    l_brow = lmrks[22:27]
+    r_brow = lmrks[17:22]
+    mouth = lmrks[48:60]
+
+    up_nose = np.concatenate( (lmrks[27:31], lmrks[33:34]) )
+    down_nose = lmrks[31:36]
+    nose = np.concatenate ( (up_nose, down_nose) )
+
+    gdf = process ( w,h,
+                         (
+                          ('eyes',  ((l_eye, True), (r_eye, True)) ),
+                          ('brows', ((l_brow, False), (r_brow,False)) ),
+                          ('up_nose', ((up_nose, False),) ),
+                          ('down_nose', ((down_nose, False),) ),
+                          ('mouth', ((mouth, True),) ),
+                         )
+                        )
+
+
+    #import code
+    #code.interact(local=dict(globals(), **locals()))
+    eyes_fall_dist = w // 32
+    eyes_thickness = max( w // 64, 1 )
+
+    brows_fall_dist = w // 32
+    brows_thickness = max( w // 256, 1 )
+
+    nose_fall_dist = w / 12
+    nose_thickness = max( w // 96, 1 )
+
+    mouth_fall_dist = w // 32
+    mouth_thickness = max( w // 64, 1 )
+
+    eyes_mask = gdf('eyes',eyes_thickness)
+    eyes_mask = 1-np.clip( eyes_mask/ eyes_fall_dist, 0, 1)
+    #eyes_mask = np.clip ( 1- ( np.sqrt( np.maximum(eyes_mask,0) ) / eyes_fall_dist ), 0, 1)
+    #eyes_mask = np.clip ( 1- ( np.cbrt( np.maximum(eyes_mask,0) ) / eyes_fall_dist ), 0, 1)
+
+    brows_mask = gdf('brows', brows_thickness)
+    brows_mask = 1-np.clip( brows_mask / brows_fall_dist, 0, 1)
+    #brows_mask = np.clip ( 1- ( np.sqrt( np.maximum(brows_mask,0) ) / brows_fall_dist ), 0, 1)
+
+    mouth_mask = gdf('mouth', mouth_thickness)
+    mouth_mask = 1-np.clip( mouth_mask / mouth_fall_dist, 0, 1)
+    #mouth_mask = np.clip ( 1- ( np.sqrt( np.maximum(mouth_mask,0) ) / mouth_fall_dist ), 0, 1)
+
+    def blend(a,b,k):
+        x = np.clip ( 0.5+0.5*(b-a)/k, 0.0, 1.0 )
+        return (a-b)*x+b - k*x*(1.0-x)
+
+
+    #nose_mask = (a-b)*x+b - k*x*(1.0-x)
+
+    #nose_mask = np.minimum (up_nose_mask , down_nose_mask )
+    #nose_mask = 1-np.clip( nose_mask / nose_fall_dist, 0, 1)
+
+    nose_mask = blend ( gdf('up_nose', nose_thickness), gdf('down_nose', nose_thickness), nose_thickness*3 )
+    nose_mask = 1-np.clip( nose_mask / nose_fall_dist, 0, 1)
+
+    up_nose_mask = gdf('up_nose', nose_thickness)
+    up_nose_mask = 1-np.clip( up_nose_mask / nose_fall_dist, 0, 1)
+    #up_nose_mask = np.clip ( 1- ( np.cbrt( np.maximum(up_nose_mask,0) ) / nose_fall_dist ), 0, 1)
+
+    down_nose_mask = gdf('down_nose', nose_thickness)
+    down_nose_mask = 1-np.clip( down_nose_mask / nose_fall_dist, 0, 1)
+    #down_nose_mask = np.clip ( 1- ( np.cbrt( np.maximum(down_nose_mask,0) ) / nose_fall_dist ), 0, 1)
+
+    #nose_mask = np.clip( up_nose_mask + down_nose_mask, 0, 1 )
+    #nose_mask /= np.max(nose_mask)
+    #nose_mask = np.maximum (up_nose_mask , down_nose_mask )
+    #nose_mask = down_nose_mask
+
+    #nose_mask = np.zeros_like(nose_mask)
+
+    eyes_mask = eyes_mask * (1-mouth_mask)
+    nose_mask = nose_mask * (1-eyes_mask)
+
+    hull_mask = hull[...,0].copy()
+    hull_mask = hull_mask * (1-eyes_mask) * (1-brows_mask) * (1-nose_mask) * (1-mouth_mask)
+
+    #eyes_mask = eyes_mask * (1-nose_mask)
+
+    mouth_mask= mouth_mask * (1-nose_mask)
+
+    brows_mask = brows_mask * (1-nose_mask)* (1-eyes_mask )
+
+    hull_mask = alpha_to_color(hull_mask, (0,1,0) )
+    eyes_mask = alpha_to_color(eyes_mask, (1,0,0) )
+    brows_mask = alpha_to_color(brows_mask, (0,0,1) )
+    nose_mask = alpha_to_color(nose_mask, (0,1,1) )
+    mouth_mask = alpha_to_color(mouth_mask, (0,0,1) )
+
+    #nose_mask = np.maximum( up_nose_mask, down_nose_mask )
+
+    result = hull_mask + mouth_mask+ nose_mask + brows_mask  + eyes_mask
+    result *= hull
+    #result = np.clip (result, 0, 1)
+    return result
 
 def get_image_eye_mask (image_shape, image_landmarks):
     if len(image_landmarks) != 68:
@@ -394,7 +618,7 @@ def draw_landmarks (image, image_landmarks, color=(0,255,0), transparent_mask=Fa
         cv2.circle(image, (x, y), 2, color, lineType=cv2.LINE_AA)
 
     if transparent_mask:
-        mask = get_image_hull_mask (image.shape, image_landmarks, ie_polys)
+        mask = get_image_hull_mask (image.shape, image_landmarks, ie_polys=ie_polys)
         image[...] = ( image * (1-mask) + image * mask / 2 )[...]
 
 def draw_rect_landmarks (image, rect, image_landmarks, face_size, face_type, transparent_mask=False, ie_polys=None, landmarks_color=(0,255,0)):
@@ -438,5 +662,5 @@ def estimate_pitch_yaw_roll(aligned_256px_landmarks):
     pitch, yaw, roll = mathlib.rotationMatrixToEulerAngles( cv2.Rodrigues(rotation_vector)[0] )
     pitch = np.clip ( pitch/1.30, -1.0, 1.0 )
     yaw = np.clip ( yaw / 1.11, -1.0, 1.0 )
-    roll = np.clip ( roll/3.15, -1.0, 1.0 )
+    roll = np.clip ( roll/3.15, -1.0, 1.0 ) #todo radians
     return -pitch, yaw, roll
