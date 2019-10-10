@@ -58,11 +58,12 @@ class SampleProcessor(object):
 
         FACE_TYPE_BEGIN = 10
         FACE_TYPE_HALF             = 10
-        FACE_TYPE_FULL             = 11
-        FACE_TYPE_HEAD             = 12  #currently unused
-        FACE_TYPE_AVATAR           = 13  #currently unused
-        FACE_TYPE_FULL_NO_ALIGN    = 14
-        FACE_TYPE_HEAD_NO_ALIGN    = 15
+        FACE_TYPE_MID_FULL         = 11
+        FACE_TYPE_FULL             = 12
+        FACE_TYPE_HEAD             = 13  #currently unused
+        FACE_TYPE_AVATAR           = 14  #currently unused
+        FACE_TYPE_FULL_NO_ALIGN    = 15
+        FACE_TYPE_HEAD_NO_ALIGN    = 16
         FACE_TYPE_END = 20
 
         MODE_BEGIN = 40
@@ -82,6 +83,7 @@ class SampleProcessor(object):
             self.ty_range = ty_range
 
     SPTF_FACETYPE_TO_FACETYPE =  {  Types.FACE_TYPE_HALF : FaceType.HALF,
+                                    Types.FACE_TYPE_MID_FULL : FaceType.MID_FULL,
                                     Types.FACE_TYPE_FULL : FaceType.FULL,
                                     Types.FACE_TYPE_HEAD : FaceType.HEAD,
                                     Types.FACE_TYPE_FULL_NO_ALIGN : FaceType.FULL_NO_ALIGN,
@@ -258,7 +260,7 @@ class SampleProcessor(object):
                 elif mode_type == SPTF.MODE_G:
                     img = np.concatenate ( (np.expand_dims(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY),-1),img_mask) , -1 )
                 elif mode_type == SPTF.MODE_GGG:
-                    img = np.concatenate ( ( np.repeat ( np.expand_dims(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY),-1), (3,), -1), img_mask), -1)
+                    img = np.repeat ( np.expand_dims(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY),-1), (3,), -1)
                 elif mode_type == SPTF.MODE_M and is_face_sample:
                     img = img_mask
 

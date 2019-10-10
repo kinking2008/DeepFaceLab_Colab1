@@ -96,6 +96,7 @@ dssim = nnlib.dssim
 
 PixelShuffler = nnlib.PixelShuffler
 SubpixelUpscaler = nnlib.SubpixelUpscaler
+SubpixelDownscaler = nnlib.SubpixelDownscaler
 Scale = nnlib.Scale
 BlurPool = nnlib.BlurPool
 FUNITAdain = nnlib.FUNITAdain
@@ -140,6 +141,8 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
         if 'CUDA_VISIBLE_DEVICES' in os.environ.keys():
             os.environ.pop('CUDA_VISIBLE_DEVICES')
 
+        os.environ['CUDA_​CACHE_​MAXSIZE'] = '536870912' #512Mb (32mb default)
+
         os.environ['TF_MIN_GPU_MULTIPROCESSOR_COUNT'] = '2'
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' #tf log errors only
 
@@ -154,13 +157,10 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
         else:
             config = tf.ConfigProto()
 
-            if device_config.backend != "tensorflow-generic":
-                #tensorflow-generic is system with NVIDIA card, but w/o NVSMI
-                #so dont hide devices and let tensorflow to choose best card
-                visible_device_list = ''
-                for idx in device_config.gpu_idxs:
-                    visible_device_list += str(idx) + ','
-                config.gpu_options.visible_device_list=visible_device_list[:-1]
+            visible_device_list = ''
+            for idx in device_config.gpu_idxs:
+                visible_device_list += str(idx) + ','
+            config.gpu_options.visible_device_list=visible_device_list[:-1]
 
         config.gpu_options.force_gpu_compatible = True
         config.gpu_options.allow_growth = device_config.allow_growth
@@ -471,6 +471,83 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
         nnlib.PixelShuffler = PixelShuffler
         nnlib.SubpixelUpscaler = PixelShuffler
 
+        if 'tensorflow' in backend:
+            class SubpixelDownscaler(KL.Layer):
+                def __init__(self, size=(2, 2), data_format='channels_last', **kwargs):
+                    super(SubpixelDownscaler, self).__init__(**kwargs)
+                    self.data_format = data_format
+                    self.size = size
+
+                def call(self, inputs):
+
+                    input_shape = K.shape(inputs)
+                    if K.int_shape(input_shape)[0] != 4:
+                        raise ValueError('Inputs should have rank 4; Received input shape:', str(K.int_shape(inputs)))
+
+                    return K.tf.space_to_depth(inputs, self.size[0], 'NHWC')
+
+                def compute_output_shape(self, input_shape):
+                    if len(input_shape) != 4:
+                        raise ValueError('Inputs should have rank ' +
+                                        str(4) +
+                                        '; Received input shape:', str(input_shape))
+
+                    height = input_shape[1] // self.size[0] if input_shape[1] is not None else None
+                    width = input_shape[2] // self.size[1] if input_shape[2] is not None else None
+                    channels = input_shape[3] * self.size[0] * self.size[1]
+
+                    return (input_shape[0], height, width, channels)
+
+                def get_config(self):
+                    config = {'size': self.size,
+                            'data_format': self.data_format}
+                    base_config = super(SubpixelDownscaler, self).get_config()
+
+                    return dict(list(base_config.items()) + list(config.items()))
+        else:
+            class SubpixelDownscaler(KL.Layer):
+                def __init__(self, size=(2, 2), data_format='channels_last', **kwargs):
+                    super(SubpixelDownscaler, self).__init__(**kwargs)
+                    self.data_format = data_format
+                    self.size = size
+
+                def call(self, inputs):
+
+                    input_shape = K.shape(inputs)
+                    if K.int_shape(input_shape)[0] != 4:
+                        raise ValueError('Inputs should have rank 4; Received input shape:', str(K.int_shape(inputs)))
+
+                    batch_size, h, w, c = input_shape[0], input_shape[1], input_shape[2], K.int_shape(inputs)[-1]
+                    rh, rw = self.size
+                    oh, ow = h // rh, w // rw
+                    oc = c * (rh * rw)
+
+                    out = K.reshape(inputs, (batch_size, oh, rh, ow, rw, c))
+                    out = K.permute_dimensions(out, (0, 1, 3, 2, 4, 5))
+                    out = K.reshape(out, (batch_size, oh, ow, oc))
+                    return out
+
+                def compute_output_shape(self, input_shape):
+                    if len(input_shape) != 4:
+                        raise ValueError('Inputs should have rank ' +
+                                        str(4) +
+                                        '; Received input shape:', str(input_shape))
+
+                    height = input_shape[1] // self.size[0] if input_shape[1] is not None else None
+                    width = input_shape[2] // self.size[1] if input_shape[2] is not None else None
+                    channels = input_shape[3] * self.size[0] * self.size[1]
+
+                    return (input_shape[0], height, width, channels)
+
+                def get_config(self):
+                    config = {'size': self.size,
+                            'data_format': self.data_format}
+                    base_config = super(SubpixelDownscaler, self).get_config()
+
+                    return dict(list(base_config.items()) + list(config.items()))
+
+        nnlib.SubpixelDownscaler = SubpixelDownscaler
+
         class BlurPool(KL.Layer):
             """
             https://arxiv.org/abs/1904.11486 https://github.com/adobe/antialiased-cnns
@@ -522,10 +599,11 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 so we don't need to slice outter MLP block and assign weights every call, just pass MLP inside.
                 also size of dense blocks is calculated automatically
             """
-            def __init__(self, axis=-1, epsilon=1e-5, momentum=0.99, **kwargs):
+            def __init__(self, axis=-1, epsilon=1e-5, momentum=0.99, kernel_initializer='glorot_uniform', **kwargs):
                 self.axis = axis
                 self.epsilon = epsilon
                 self.momentum = momentum
+                self.kernel_initializer = kernel_initializer
                 super(FUNITAdain, self).__init__(**kwargs)
 
             def build(self, input_shape):
@@ -533,9 +611,9 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 x, mlp = input_shape
                 units = x[self.axis]
 
-                self.kernel1 = self.add_weight(shape=(units, units), initializer='he_normal', name='kernel1')
+                self.kernel1 = self.add_weight(shape=(units, units), initializer=self.kernel_initializer, name='kernel1')
                 self.bias1 = self.add_weight(shape=(units,), initializer='zeros', name='bias1')
-                self.kernel2 = self.add_weight(shape=(units, units), initializer='he_normal', name='kernel2')
+                self.kernel2 = self.add_weight(shape=(units, units), initializer=self.kernel_initializer, name='kernel2')
                 self.bias2 = self.add_weight(shape=(units,), initializer='zeros', name='bias2')
 
                 self.built = True
