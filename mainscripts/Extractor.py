@@ -14,10 +14,10 @@ import numpy as np
 import facelib
 import imagelib
 import mathlib
-from facelib import FaceType, FANSegmentator, LandmarksProcessor
+from facelib import FaceType, LandmarksProcessor
 from interact import interact as io
 from joblib import Subprocessor
-from nnlib import nnlib
+from nnlib import TernausNet, nnlib
 from utils import Path_utils
 from utils.cv2_utils import *
 from utils.DFLJPG import DFLJPG
@@ -95,7 +95,7 @@ class ExtractSubprocessor(Subprocessor):
                     
             elif self.type == 'fanseg':
                 nnlib.import_all (device_config)
-                self.e = facelib.FANSegmentator(256, FaceType.toString(FaceType.FULL) )
+                self.e = TernausNet(256, FaceType.toString(FaceType.FULL) )
                 self.e.__enter__()
                     
             elif self.type == 'final':
@@ -158,10 +158,6 @@ class ExtractSubprocessor(Subprocessor):
                             break
                         
                     if self.max_faces_from_image != 0 and len(data.rects) > 1:
-                        #sort by largest area first
-                        x = [ [(l,t,r,b), (r-l)*(b-t) ]  for (l,t,r,b) in data.rects]
-                        x = sorted(x, key=operator.itemgetter(1), reverse=True )
-                        x = [ a[0] for a in x]
                         data.rects = x[0:self.max_faces_from_image]
 
                 return data
@@ -221,6 +217,7 @@ class ExtractSubprocessor(Subprocessor):
                 else:
                     face_idx = 0
                     for rect, image_landmarks in zip( rects, landmarks ):
+                        
                         if src_dflimg is not None and face_idx > 1:
                             #cannot extract more than 1 face from dflimg
                             break
@@ -283,7 +280,6 @@ class ExtractSubprocessor(Subprocessor):
                     fanseg_mask = self.e.extract( image / 255.0 )
                     src_dflimg.embed_and_set( filename_path_str, 
                                               fanseg_mask=fanseg_mask,
-                                              #fanseg_mask_ver=FANSegmentator.VERSION,
                                               )
         
         #overridable

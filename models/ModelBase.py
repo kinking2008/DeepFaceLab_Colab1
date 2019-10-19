@@ -123,10 +123,11 @@ class ModelBase(object):
                 self.options['sort_by_yaw'] = self.options.get('sort_by_yaw', False)
 
         if ask_random_flip:
-            if (self.iter == 0):
-                self.options['random_flip'] = io.input_bool("Flip faces randomly? (y/n ?:help skip:y) : ", True, help_message="Predicted face will look more naturally without this option, but src faceset should cover all face directions as dst faceset.")
+            default_random_flip = self.options.get('random_flip', True)
+            if (self.iter == 0 or ask_override):
+                self.options['random_flip'] = io.input_bool(f"Flip faces randomly? (y/n ?:help skip:{yn_str[default_random_flip]}) : ", default_random_flip, help_message="Predicted face will look more naturally without this option, but src faceset should cover all face directions as dst faceset.")
             else:
-                self.options['random_flip'] = self.options.get('random_flip', True)
+                self.options['random_flip'] = self.options.get('random_flip', default_random_flip)
 
         if ask_src_scale_mod:
             if (self.iter == 0):
@@ -225,8 +226,14 @@ class ModelBase(object):
                     io.destroy_window(wnd_name)
                 else:
                     self.sample_for_preview = self.generate_next_sample()
-                self.last_sample = self.sample_for_preview
-
+                    
+            try:
+                self.get_static_preview()
+            except:
+                self.sample_for_preview = self.generate_next_sample()
+                
+            self.last_sample = self.sample_for_preview
+            
         ###Generate text summary of model hyperparameters
         #Find the longest key name and value string. Used as column widths.
         width_name = max([len(k) for k in self.options.keys()] + [17]) + 1 # Single space buffer to left edge. Minimum of 17, the length of the longest static string used "Current iteration"

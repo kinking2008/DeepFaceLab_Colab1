@@ -11,7 +11,7 @@ from samplelib import *
 
 
 #SAE - Styled AutoEncoder
-class SAEv2Model(ModelBase):
+class SAEHDModel(ModelBase):
 
     #override
     def onInitializeOptions(self, is_first_run, ask_override):
@@ -20,7 +20,7 @@ class SAEv2Model(ModelBase):
         default_resolution = 128
         default_archi = 'df'
         default_face_type = 'f'
-        default_learn_mask = True
+        
 
         if is_first_run:
             resolution = io.input_int("Resolution ( 64-256 ?:help skip:128) : ", default_resolution, help_message="More resolution requires more VRAM and time to train. Value will be adjusted to multiple of 16.")
@@ -28,14 +28,17 @@ class SAEv2Model(ModelBase):
             while np.modf(resolution / 16)[0] != 0.0:
                 resolution -= 1
             self.options['resolution'] = resolution
-
             self.options['face_type'] = io.input_str ("Half, mid full, or full face? (h/mf/f, ?:help skip:f) : ", default_face_type, ['h','mf','f'], help_message="Half face has better resolution, but covers less area of cheeks. Mid face is 30% wider than half face.").lower()
-            self.options['learn_mask'] = io.input_bool ( f"Learn mask? (y/n, ?:help skip:{yn_str[default_learn_mask]} ) : " , default_learn_mask, help_message="Learning mask can help model to recognize face directions. Learn without mask can reduce model size, in this case converter forced to use 'not predicted mask' that is not smooth as predicted.")
         else:
             self.options['resolution'] = self.options.get('resolution', default_resolution)
             self.options['face_type'] = self.options.get('face_type', default_face_type)
-            self.options['learn_mask'] = self.options.get('learn_mask', default_learn_mask)
 
+        default_learn_mask = self.options.get('learn_mask', True)
+        if is_first_run or ask_override:
+            self.options['learn_mask'] = io.input_bool ( f"Learn mask? (y/n, ?:help skip:{yn_str[default_learn_mask]} ) : " , default_learn_mask, help_message="Learning mask can help model to recognize face directions. Learn without mask can reduce model size, in this case converter forced to use 'not predicted mask' that is not smooth as predicted.")
+        else:
+            self.options['learn_mask'] = self.options.get('learn_mask', default_learn_mask)
+        
         if (is_first_run or ask_override) and 'tensorflow' in self.device_config.backend:
             def_optimizer_mode = self.options.get('optimizer_mode', 1)
             self.options['optimizer_mode'] = io.input_int ("Optimizer mode? ( 1,2,3 ?:help skip:%d) : " % (def_optimizer_mode), def_optimizer_mode, help_message="1 - no changes. 2 - allows you to train x2 bigger network consuming RAM. 3 - allows you to train x3 bigger network consuming huge amount of RAM and slower, depends on CPU power.")
@@ -57,23 +60,25 @@ class SAEv2Model(ModelBase):
             self.options['ae_dims'] = self.options.get('ae_dims', default_ae_dims)
             self.options['ed_ch_dims'] = self.options.get('ed_ch_dims', default_ed_ch_dims)
 
-        default_face_style_power = 0.0
-        default_bg_style_power = 0.0
+        default_true_face_training = self.options.get('true_face_training', False)
+        default_face_style_power = self.options.get('face_style_power', 0.0)
+        default_bg_style_power = self.options.get('bg_style_power', 0.0)
+        
         if is_first_run or ask_override:
-            default_face_style_power = default_face_style_power if is_first_run else self.options.get('face_style_power', default_face_style_power)
+            default_random_warp = self.options.get('random_warp', True)
+            self.options['random_warp'] = io.input_bool (f"Enable random warp of samples? ( y/n, ?:help skip:{yn_str[default_random_warp]}) : ", default_random_warp, help_message="Random warp is required to generalize facial expressions of both faces. When the face is trained enough, you can disable it to get extra sharpness for less amount of iterations.")
+
+            self.options['true_face_training'] = io.input_bool (f"Enable 'true face' training? (y/n, ?:help skip:{yn_str[default_true_face_training]}) : ", default_true_face_training, help_message="The result face will be more like src and will get extra sharpness. Enable it for last 10-20k iterations before conversion.")
+
             self.options['face_style_power'] = np.clip ( io.input_number("Face style power ( 0.0 .. 100.0 ?:help skip:%.2f) : " % (default_face_style_power), default_face_style_power,
                                                                                help_message="Learn to transfer face style details such as light and color conditions. Warning: Enable it only after 10k iters, when predicted face is clear enough to start learn style. Start from 0.1 value and check history changes. Enabling this option increases the chance of model collapse."), 0.0, 100.0 )
 
-            default_bg_style_power = default_bg_style_power if is_first_run else self.options.get('bg_style_power', default_bg_style_power)
             self.options['bg_style_power'] = np.clip ( io.input_number("Background style power ( 0.0 .. 100.0 ?:help skip:%.2f) : " % (default_bg_style_power), default_bg_style_power,
                                                                                help_message="Learn to transfer image around face. This can make face more like dst. Enabling this option increases the chance of model collapse."), 0.0, 100.0 )
 
-            default_apply_random_ct = False if is_first_run else self.options.get('apply_random_ct', False)
-            self.options['apply_random_ct'] = io.input_bool (f"Apply random color transfer to src faceset? (y/n, ?:help skip:{yn_str[default_apply_random_ct]}) : ", default_apply_random_ct, help_message="Increase variativity of src samples by apply LCT color transfer from random dst samples. It is like 'face_style' learning, but more precise color transfer and without risk of model collapse, also it does not require additional GPU resources, but the training time may be longer, due to the src faceset is becoming more diverse.")
-
-            default_true_face_training = False if is_first_run else self.options.get('true_face_training', False)
-            self.options['true_face_training'] = io.input_bool (f"Enable 'true face' training? (y/n, ?:help skip:{yn_str[default_true_face_training]}) : ", default_true_face_training, help_message="The result face will be more like src and will get extra sharpness. Enable it for last 10-20k iterations before conversion.")
-
+            default_ct_mode = self.options.get('ct_mode', 'none')
+            self.options['ct_mode'] = io.input_str (f"Color transfer mode apply to src faceset. ( none/rct/lct/mkl/idt, ?:help skip:{default_ct_mode}) : ", default_ct_mode, ['none','rct','lct','mkl','idt'], help_message="Change color distribution of src samples close to dst samples. Try all modes to find the best.")
+            
             if nnlib.device.backend != 'plaidML': # todo https://github.com/plaidml/plaidml/issues/301
                 default_clipgrad = False if is_first_run else self.options.get('clipgrad', False)
                 self.options['clipgrad'] = io.input_bool (f"Enable gradient clipping? (y/n, ?:help skip:{yn_str[default_clipgrad]}) : ", default_clipgrad, help_message="Gradient clipping reduces chance of model collapse, sacrificing speed of training.")
@@ -81,9 +86,11 @@ class SAEv2Model(ModelBase):
                 self.options['clipgrad'] = False
 
         else:
+            self.options['random_warp'] = self.options.get('random_warp', True)
+            self.options['true_face_training'] = self.options.get('true_face_training', default_true_face_training)
             self.options['face_style_power'] = self.options.get('face_style_power', default_face_style_power)
             self.options['bg_style_power'] = self.options.get('bg_style_power', default_bg_style_power)
-            self.options['apply_random_ct'] = self.options.get('apply_random_ct', False)
+            self.options['ct_mode'] = self.options.get('ct_mode', 'none')
             self.options['clipgrad'] = self.options.get('clipgrad', False)
 
         if is_first_run:
@@ -108,7 +115,6 @@ class SAEv2Model(ModelBase):
         bgr_shape = (resolution, resolution, 3)
         mask_shape = (resolution, resolution, 1)
 
-        apply_random_ct = self.options.get('apply_random_ct', False)
         self.true_face_training = self.options.get('true_face_training', False)
         masked_training = True
 
@@ -449,7 +455,7 @@ class SAEv2Model(ModelBase):
             self.src_dst_opt      = RMSprop(lr=5e-5, clipnorm=1.0 if self.options['clipgrad'] else 0.0, tf_cpu_mode=self.options['optimizer_mode']-1)
             self.src_dst_mask_opt = RMSprop(lr=5e-5, clipnorm=1.0 if self.options['clipgrad'] else 0.0, tf_cpu_mode=self.options['optimizer_mode']-1)
             self.D_opt            = RMSprop(lr=5e-5, clipnorm=1.0 if self.options['clipgrad'] else 0.0, tf_cpu_mode=self.options['optimizer_mode']-1)
-
+        
             src_loss =  K.mean ( 10*dssim(kernel_size=int(resolution/11.6),max_value=1.0)( target_src_masked_opt, pred_src_src_masked_opt) )
             src_loss += K.mean ( 10*K.square( target_src_masked_opt - pred_src_src_masked_opt ) )
 
@@ -514,7 +520,7 @@ class SAEv2Model(ModelBase):
                 face_type = t.FACE_TYPE_MID_FULL
             elif self.options['face_type'] == 'f':
                 face_type = t.FACE_TYPE_FULL
-
+            
             t_mode_bgr = t.MODE_BGR if not self.pretrain else t.MODE_BGR_SHUFFLE
 
             training_data_src_path = self.training_data_src_path
@@ -525,20 +531,22 @@ class SAEv2Model(ModelBase):
                 training_data_src_path = self.pretraining_data_path
                 training_data_dst_path = self.pretraining_data_path
                 sort_by_yaw = False
+                
+            t_img_warped = t.IMG_WARPED_TRANSFORMED if self.options['random_warp'] else t.IMG_TRANSFORMED 
 
             self.set_training_data_generators ([
                     SampleGeneratorFace(training_data_src_path, sort_by_yaw_target_samples_path=training_data_dst_path if sort_by_yaw else None,
-                                                                random_ct_samples_path=training_data_dst_path if apply_random_ct else None,
+                                                                random_ct_samples_path=training_data_dst_path if self.options['ct_mode'] != 'none' else None,
                                                                 debug=self.is_debug(), batch_size=self.batch_size,
                         sample_process_options=SampleProcessor.Options(random_flip=self.random_flip, scale_range=np.array([-0.05, 0.05])+self.src_scale_mod / 100.0 ),
-                        output_sample_types = [ {'types' : (t.IMG_WARPED_TRANSFORMED, face_type, t_mode_bgr), 'resolution':resolution, 'apply_ct': apply_random_ct},
-                                                {'types' : (t.IMG_TRANSFORMED, face_type, t_mode_bgr), 'resolution': resolution, 'apply_ct': apply_random_ct },
+                        output_sample_types = [ {'types' : (t_img_warped, face_type, t_mode_bgr), 'resolution':resolution, 'ct_mode': self.options['ct_mode'] },
+                                                {'types' : (t.IMG_TRANSFORMED, face_type, t_mode_bgr), 'resolution': resolution, 'ct_mode': self.options['ct_mode'] },
                                                 {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_M), 'resolution': resolution } ]
-                         ),
+                                              ),
 
                     SampleGeneratorFace(training_data_dst_path, debug=self.is_debug(), batch_size=self.batch_size,
                         sample_process_options=SampleProcessor.Options(random_flip=self.random_flip, ),
-                        output_sample_types = [ {'types' : (t.IMG_WARPED_TRANSFORMED, face_type, t_mode_bgr), 'resolution':resolution},
+                        output_sample_types = [ {'types' : (t_img_warped, face_type, t_mode_bgr), 'resolution':resolution},
                                                 {'types' : (t.IMG_TRANSFORMED, face_type, t_mode_bgr), 'resolution': resolution},
                                                 {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_M), 'resolution': resolution} ])
                              ])
@@ -631,8 +639,8 @@ class SAEv2Model(ModelBase):
 
         import converters
         return self.predictor_func, (self.options['resolution'], self.options['resolution'], 3), converters.ConverterConfigMasked(face_type=face_type,
-                                     default_mode = 1 if self.options['apply_random_ct'] or self.options['face_style_power'] or self.options['bg_style_power'] else 4,
+                                     default_mode = 1 if self.options['ct_mode'] != 'none' or self.options['face_style_power'] or self.options['bg_style_power'] else 4,
                                      clip_hborder_mask_per=0.0625 if (face_type != FaceType.HALF) else 0,
                                     )
 
-Model = SAEv2Model
+Model = SAEHDModel

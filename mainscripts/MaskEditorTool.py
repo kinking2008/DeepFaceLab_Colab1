@@ -319,7 +319,14 @@ class MaskEditor:
 
     def get_ie_polys(self):
         return self.ie_polys
-
+    
+    def set_ie_polys(self, saved_ie_polys):
+        self.state = self.STATE_NONE
+        self.ie_polys = saved_ie_polys
+        self.redo_to_end_point()
+        self.mask_finish()
+        
+        
 def mask_editor_main(input_dir, confirmed_dir=None, skipped_dir=None, no_default_mask=False):
     input_path = Path(input_dir)
 
@@ -351,7 +358,7 @@ def mask_editor_main(input_dir, confirmed_dir=None, skipped_dir=None, no_default
     done_paths = []
     done_images_types = {}
     image_paths_total = len(image_paths)
-
+    saved_ie_polys = IEPolys()
     zoom_factor = 1.0
     preview_images_count = 9
     target_wh = 256
@@ -361,7 +368,7 @@ def mask_editor_main(input_dir, confirmed_dir=None, skipped_dir=None, no_default
     do_save_count = 0
     do_skip_move_count = 0
     do_skip_count = 0
-
+    
     def jobs_count():
         return do_prev_count + do_save_move_count + do_save_count + do_skip_move_count + do_skip_count
 
@@ -427,6 +434,7 @@ def mask_editor_main(input_dir, confirmed_dir=None, skipped_dir=None, no_default
                     '[Right mouse button] - mark exclude mask.',
                     '[Middle mouse button] - finish current poly.',
                     '[Mouse wheel] - undo/redo poly or point. [+ctrl] - undo to begin/redo to end',
+                    '[r] - applies edits made to last saved image.',
                     '[q] - prev image. [w] - skip and move to %s. [e] - save and move to %s. ' % (skipped_path.name, confirmed_path.name),
                     '[z] - prev image. [x] - skip. [c] - save. ',
                     'hold [shift] - speed up the frame counter by 10.',
@@ -484,13 +492,17 @@ def mask_editor_main(input_dir, confirmed_dir=None, skipped_dir=None, no_default
                         break
                     elif filepath is not None:
                         if chr_key == 'e':
+                            saved_ie_polys = ed.ie_polys
                             do_save_move_count = 1 if not shift_pressed else 10
                         elif chr_key == 'c':
+                            saved_ie_polys = ed.ie_polys
                             do_save_count = 1 if not shift_pressed else 10
                         elif chr_key == 'w':
                             do_skip_move_count = 1 if not shift_pressed else 10
                         elif chr_key == 'x':
                             do_skip_count = 1 if not shift_pressed else 10
+                        elif chr_key == 'r' and saved_ie_polys != None:
+                            ed.set_ie_polys(saved_ie_polys)
 
             if do_prev_count > 0:
                 do_prev_count -= 1
