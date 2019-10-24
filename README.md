@@ -24,10 +24,10 @@ No need to copy, zip, unzip multiple times, no need to worry about data loss.
 
 # Guide
 1. First, You need a google account  
-2. Secend,you need a [DeepFaceLab_Colab.ipynb](https://github.com/dream80/DeepFaceLab_Colab/blob/master/DeepFaceLab_Colab.ipynb) file  
+2. Secend,you need a [DeepFaceLab_Colab_V2.ipynb](https://github.com/dream80/DeepFaceLab_Colab/blob/master/DeepFaceLab_Colab_V2.ipynb) file  
 3. Third,  Click ***Open in Colab***  ，Run it！
-4. Fourth, Run [ViewLastHistory.ipynb](https://github.com/dream80/DeepFaceLab_Colab/blob/master/ViewLastHistory.ipynb) file,Check out the latest results.
-5. Sixth,Continue training  Step 6 of using the DeepFaceLab_Colab.ipynb file!
+4. Fourth, View results online through Google Drive
+5. Sixth,Continue training  Step 6 of using the DeepFaceLab_Colab_V2.ipynb file!
 
   
 
