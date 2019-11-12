@@ -76,7 +76,7 @@ class ExtractSubprocessor(Subprocessor):
                     self.e = facelib.DLIBExtractor(nnlib.dlib)
                 elif self.type == 'rects-s3fd':
                     nnlib.import_all (device_config)
-                    self.e = facelib.S3FDExtractor()
+                    self.e = facelib.S3FDExtractor(do_dummy_predict=True)
                 else:
                     raise ValueError ("Wrong type.")
 
@@ -88,7 +88,7 @@ class ExtractSubprocessor(Subprocessor):
                 self.e = facelib.FANExtractor()
                 self.e.__enter__()
                 if self.device_vram >= 2:
-                    self.second_pass_e = facelib.S3FDExtractor()
+                    self.second_pass_e = facelib.S3FDExtractor(do_dummy_predict=False)
                     self.second_pass_e.__enter__()
                 else:
                     self.second_pass_e = None
@@ -542,7 +542,8 @@ class ExtractSubprocessor(Subprocessor):
     def on_result (self, host_dict, data, result):
         if self.manual == True:
             filename, landmarks = result.filename, result.landmarks
-            if len(landmarks) != 0:
+            
+            if len(landmarks) != 0 and landmarks[0] is not None:
                 self.landmarks = landmarks[0]
 
             (h,w,c) = self.image.shape
@@ -617,10 +618,8 @@ class ExtractSubprocessor(Subprocessor):
                     count = 1
                     
                     if not manual:
-                        if (type == 'rects-dlib' or type == 'rects-mt' ):
+                        if (type == 'rects-mt' ):
                             count = int (max (1, dev_vram / 2) )
-                        if type == 'rects-s3fd':
-                            count = int (max (1, dev_vram / 5) )
                             
                     if count == 1:
                         result += [ (idx, 'GPU', dev_name, dev_vram) ]
