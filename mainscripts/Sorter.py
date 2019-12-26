@@ -1,7 +1,9 @@
-﻿import os
-import multiprocessing
+﻿import multiprocessing
 import operator
+import os
 import sys
+import tempfile
+from functools import cmp_to_key
 from pathlib import Path
 from shutil import copyfile
 
@@ -11,16 +13,13 @@ from numpy import linalg as npla
 
 import imagelib
 from facelib import LandmarksProcessor
-from functools import cmp_to_key
 from imagelib import estimate_sharpness
 from interact import interact as io
 from joblib import Subprocessor
-from nnlib import VGGFace
+from nnlib import VGGFace, nnlib
 from utils import Path_utils
 from utils.cv2_utils import *
-from utils.DFLJPG import DFLJPG
-from utils.DFLPNG import DFLPNG
-
+from DFLIMG import *
 
 class BlurEstimatorSubprocessor(Subprocessor):
     class Cli(Subprocessor.Cli):
@@ -32,13 +31,7 @@ class BlurEstimatorSubprocessor(Subprocessor):
         #override
         def process_data(self, data):
             filepath = Path( data[0] )
-
-            if filepath.suffix == '.png':
-                dflimg = DFLPNG.load( str(filepath) )
-            elif filepath.suffix == '.jpg':
-                dflimg = DFLJPG.load ( str(filepath) )
-            else:
-                dflimg = None
+            dflimg = DFLIMG.load (filepath)
 
             if dflimg is not None:
                 image = cv2_imread( str(filepath) )
@@ -118,12 +111,7 @@ def sort_by_face(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load ( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         if dflimg is None:
             io.log_err ("%s is not a dfl image file" % (filepath.name) )
@@ -159,12 +147,7 @@ def sort_by_face_dissim(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load ( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         if dflimg is None:
             io.log_err ("%s is not a dfl image file" % (filepath.name) )
@@ -197,23 +180,14 @@ def sort_by_face_yaw(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load ( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         if dflimg is None:
             io.log_err ("%s is not a dfl image file" % (filepath.name) )
             trash_img_list.append ( [str(filepath)] )
             continue
 
-        pitch_yaw_roll = dflimg.get_pitch_yaw_roll()
-        if pitch_yaw_roll is not None:
-            pitch, yaw, roll = pitch_yaw_roll
-        else:
-            pitch, yaw, roll = LandmarksProcessor.estimate_pitch_yaw_roll ( dflimg.get_landmarks() )
+        pitch, yaw, roll = LandmarksProcessor.estimate_pitch_yaw_roll ( dflimg.get_landmarks() )
 
         img_list.append( [str(filepath), yaw ] )
 
@@ -229,23 +203,14 @@ def sort_by_face_pitch(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load ( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         if dflimg is None:
             io.log_err ("%s is not a dfl image file" % (filepath.name) )
             trash_img_list.append ( [str(filepath)] )
             continue
 
-        pitch_yaw_roll = dflimg.get_pitch_yaw_roll()
-        if pitch_yaw_roll is not None:
-            pitch, yaw, roll = pitch_yaw_roll
-        else:
-            pitch, yaw, roll = LandmarksProcessor.estimate_pitch_yaw_roll ( dflimg.get_landmarks() )
+        pitch, yaw, roll = LandmarksProcessor.estimate_pitch_yaw_roll ( dflimg.get_landmarks() )
 
         img_list.append( [str(filepath), pitch ] )
 
@@ -423,12 +388,7 @@ def sort_by_hist_dissim(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load ( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         image = cv2_imread(str(filepath))
 
@@ -480,12 +440,7 @@ def sort_by_origname(input_path):
     for filepath in io.progress_bar_generator( Path_utils.get_image_paths(input_path), "Loading"):
         filepath = Path(filepath)
 
-        if filepath.suffix == '.png':
-            dflimg = DFLPNG.load( str(filepath) )
-        elif filepath.suffix == '.jpg':
-            dflimg = DFLJPG.load( str(filepath) )
-        else:
-            dflimg = None
+        dflimg = DFLIMG.load (filepath)
 
         if dflimg is None:
             io.log_err ("%s is not a dfl image file" % (filepath.name) )
@@ -527,12 +482,7 @@ class FinalLoaderSubprocessor(Subprocessor):
             filepath = Path(data[0])
 
             try:
-                if filepath.suffix == '.png':
-                    dflimg = DFLPNG.load( str(filepath) )
-                elif filepath.suffix == '.jpg':
-                    dflimg = DFLJPG.load( str(filepath) )
-                else:
-                    dflimg = None
+                dflimg = DFLIMG.load (filepath)
 
                 if dflimg is None:
                     self.log_err("%s is not a dfl image file" % (filepath.name))
@@ -800,7 +750,7 @@ def sort_final(input_path, include_by_blur=True):
 
 def sort_by_vggface(input_path):
     io.log_info ("Sorting by face similarity using VGGFace model...")
-    
+
     model = VGGFace()
 
     final_img_list = []
@@ -811,7 +761,7 @@ def sort_by_vggface(input_path):
     img_list_len = len(img_list)
     img_list_range = [*range(img_list_len)]
 
-    feats = [None]*img_list_len    
+    feats = [None]*img_list_len
     for i in io.progress_bar_generator(img_list_range, "Loading"):
         img = cv2_imread( img_list[i][0] ).astype(np.float32)
         img = imagelib.normalize_channels (img, 3)
@@ -823,52 +773,98 @@ def sort_by_vggface(input_path):
         feats[i] = model.predict( img[None,...] )[0]
 
     tmp = np.zeros( (img_list_len,) )
-    float_inf = float("inf")    
-    for i in io.progress_bar_generator ( range(img_list_len-1), "Sorting" ):  
+    float_inf = float("inf")
+    for i in io.progress_bar_generator ( range(img_list_len-1), "Sorting" ):
         i_feat = feats[i]
-        
+
         for j in img_list_range:
             tmp[j] = npla.norm(i_feat-feats[j]) if j >= i+1 else float_inf
-            
+
         idx = np.argmin(tmp)
-        
+
         img_list[i+1], img_list[idx] = img_list[idx], img_list[i+1]
         feats[i+1], feats[idx] = feats[idx], feats[i+1]
 
     return img_list, trash_img_list
-    
-"""
-    img_list_len = len(img_list)
-    
-    for i in io.progress_bar_generator ( range(img_list_len-1), "Sorting" ):        
-        a = []
-        i_1 = img_list[i][1]
-        
-        
-        for j in range(i+1, img_list_len):
-            a.append ( [ j, np.linalg.norm(i_1-img_list[j][1]) ] )
-        
-        x = sorted(a, key=operator.itemgetter(1) )[0][0]
-        saved = img_list[i+1]
-        img_list[i+1] = img_list[x]
-        img_list[x] = saved
-        
-        
-    q = np.array ( [ x[1] for x in img_list ] )
-    
-    for i in io.progress_bar_generator ( range(img_list_len-1), "Sorting" ):        
-        
-        a = np.linalg.norm( q[i] - q[i+1:], axis=1 )
-        a = i+1+np.argmin(a)        
-        
-        saved = img_list[i+1]
-        img_list[i+1] = img_list[a]
-        img_list[a] = saved
-        
-        saved = q[i+1]
-        q[i+1] = q[a]
-        q[a] = saved
-"""
+
+def sort_by_absdiff(input_path):
+    io.log_info ("Sorting by absolute difference...")
+
+    is_sim = io.input_bool ("Sort by similar? ( y/n ?:help skip:y ) : ", True, help_message="Otherwise sort by dissimilar.")
+
+    from nnlib import nnlib
+    exec( nnlib.import_all( device_config=nnlib.device.Config() ), locals(), globals() )
+
+    image_paths = Path_utils.get_image_paths(input_path)
+    image_paths_len = len(image_paths)
+
+    batch_size = 1024
+    batch_size_remain = image_paths_len % batch_size
+
+    i_t = Input ( (256,256,3) )
+    j_t = Input ( (256,256,3) )
+
+    outputs = []
+    for i in range(batch_size):
+        outputs += [ K.sum( K.abs(i_t-j_t[i]), axis=[1,2,3] ) ]
+
+    func_bs_full = K.function ( [i_t,j_t], outputs)
+
+    outputs = []
+    for i in range(batch_size_remain):
+        outputs += [ K.sum( K.abs(i_t-j_t[i]), axis=[1,2,3] ) ]
+
+    func_bs_remain = K.function ( [i_t,j_t], outputs)
+
+    import h5py
+    db_file_path = Path(tempfile.gettempdir()) / 'sort_cache.hdf5'
+    db_file = h5py.File( str(db_file_path), "w")
+    db = db_file.create_dataset("results", (image_paths_len,image_paths_len), compression="gzip")
+
+
+    pg_len = image_paths_len // batch_size
+    if batch_size_remain != 0:
+        pg_len += 1
+
+    pg_len = int( (  pg_len*pg_len - pg_len ) / 2 + pg_len )
+
+    io.progress_bar ("Computing", pg_len)
+    j=0
+    while j < image_paths_len:
+        j_images = [ cv2_imread(x) for x in image_paths[j:j+batch_size] ]
+        j_images_len = len(j_images)
+
+        func = func_bs_remain if image_paths_len-j < batch_size else func_bs_full
+
+        i=0
+        while i < image_paths_len:
+            if i >= j:
+                i_images = [ cv2_imread(x) for x in image_paths[i:i+batch_size] ]
+                i_images_len = len(i_images)
+                result = func ([i_images,j_images])
+                db[j:j+j_images_len,i:i+i_images_len] = np.array(result)
+                io.progress_bar_inc(1)
+
+            i += batch_size
+        db_file.flush()
+        j += batch_size
+
+    io.progress_bar_close()
+
+    next_id = 0
+    sorted = [next_id]
+    for i in io.progress_bar_generator ( range(image_paths_len-1), "Sorting" ):
+        id_ar = np.concatenate ( [ db[:next_id,next_id], db[next_id,next_id:] ] )
+        id_ar = np.argsort(id_ar)
+
+
+        next_id = np.setdiff1d(id_ar, sorted, True)[ 0 if is_sim else -1]
+        sorted += [next_id]
+    db_file.close()
+    db_file_path.unlink()
+
+    img_list = [ (image_paths[x],) for x in sorted]
+    return img_list, []
 
 def final_process(input_path, img_list, trash_img_list):
     if len(trash_img_list) != 0:
@@ -909,8 +905,6 @@ def final_process(input_path, img_list, trash_img_list):
             except:
                 io.log_info ('fail to rename %s' % (src.name) )
 
-
-
 def main (input_path, sort_by_method):
     input_path = Path(input_path)
     sort_by_method = sort_by_method.lower()
@@ -932,6 +926,7 @@ def main (input_path, sort_by_method):
     elif sort_by_method == 'origname':      img_list, trash_img_list = sort_by_origname (input_path)
     elif sort_by_method == 'oneface':       img_list, trash_img_list = sort_by_oneface_in_image (input_path)
     elif sort_by_method == 'vggface':       img_list, trash_img_list = sort_by_vggface (input_path)
+    elif sort_by_method == 'absdiff':       img_list, trash_img_list = sort_by_absdiff (input_path)
     elif sort_by_method == 'final':         img_list, trash_img_list = sort_final (input_path)
     elif sort_by_method == 'final-no-blur': img_list, trash_img_list = sort_final (input_path, include_by_blur=False)
 

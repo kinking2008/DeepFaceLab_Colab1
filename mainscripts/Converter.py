@@ -14,17 +14,16 @@ import numpy as np
 import numpy.linalg as npla
 
 import imagelib
+import samplelib
 from converters import (ConverterConfig, ConvertFaceAvatar, ConvertMasked,
                         FrameInfo)
 from facelib import FaceType, LandmarksProcessor
-from nnlib import TernausNet
-
 from interact import interact as io
 from joblib import SubprocessFunctionCaller, Subprocessor
+from nnlib import TernausNet
 from utils import Path_utils
 from utils.cv2_utils import *
-from utils.DFLJPG import DFLJPG
-from utils.DFLPNG import DFLPNG
+from DFLIMG import DFLIMG
 
 from .ConverterScreen import Screen, ScreenManager
 
@@ -384,7 +383,7 @@ class ConvertSubprocessor(Subprocessor):
 
             io.log_info ("Session is saved to " + '/'.join (self.converter_session_filepath.parts[-2:]) )
 
-    cfg_change_keys = ['`','1', '2', '3', '4', '5', '6', '7', '8', '9',
+    cfg_change_keys = ['`','1', '2', '3', '4', '5', '6', '7', '8', 
                                  'q', 'a', 'w', 's', 'e', 'd', 'r', 'f', 'y','h','u','j','i','k','o','l','p', ';',':',#'t', 'g',
                                  'z', 'x', 'c', 'v', 'b','n'   ]
     #override
@@ -447,7 +446,7 @@ class ConvertSubprocessor(Subprocessor):
                             if cfg.type == ConverterConfig.TYPE_MASKED:
                                 if chr_key == '`':
                                     cfg.set_mode(0)
-                                elif key >= ord('1') and key <= ord('9'):
+                                elif key >= ord('1') and key <= ord('8'):
                                     cfg.set_mode( key - ord('0') )
                                 elif chr_key == 'q':
                                     cfg.add_hist_match_threshold(1 if not shift_pressed else 5)
@@ -670,24 +669,40 @@ def main (args, device_args):
                 io.log_err('Aligned directory not found. Please ensure it exists.')
                 return
 
+            packed_samples = None
+            try:
+                packed_samples = samplelib.PackedFaceset.load(aligned_path)  
+            except:
+                io.log_err(f"Error occured while loading samplelib.PackedFaceset.load {str(aligned_path)}, {traceback.format_exc()}")
+
+ 
+            if packed_samples is not None:      
+                io.log_info ("Using packed faceset.")          
+                def generator():
+                    for sample in io.progress_bar_generator( packed_samples, "Collecting alignments"):                      
+                        filepath = Path(sample.filename)                        
+                        yield DFLIMG.load(filepath, loader_func=lambda x: sample.read_raw_file()  )
+            else:
+                def generator():
+                    for filepath in io.progress_bar_generator( Path_utils.get_image_paths(aligned_path), "Collecting alignments"):
+                        filepath = Path(filepath)
+                        yield DFLIMG.load(filepath)
+                            
             alignments = {}
             multiple_faces_detected = False
-            aligned_path_image_paths = Path_utils.get_image_paths(aligned_path)
-            for filepath in io.progress_bar_generator(aligned_path_image_paths, "Collecting alignments"):
-                filepath = Path(filepath)
-
-                if filepath.suffix == '.png':
-                    dflimg = DFLPNG.load( str(filepath) )
-                elif filepath.suffix == '.jpg':
-                    dflimg = DFLJPG.load ( str(filepath) )
-                else:
-                    dflimg = None
-
+            
+            for dflimg in generator():
                 if dflimg is None:
                     io.log_err ("%s is not a dfl image file" % (filepath.name) )
                     continue
 
-                source_filename_stem = Path( dflimg.get_source_filename() ).stem
+                source_filename = dflimg.get_source_filename()
+                if source_filename is None or source_filename == "_":
+                    continue
+                
+                source_filename = Path(source_filename)
+                source_filename_stem = source_filename.stem
+                
                 if source_filename_stem not in alignments.keys():
                     alignments[ source_filename_stem ] = []
 
@@ -739,14 +754,8 @@ def main (args, device_args):
             filesdata = []
             for filepath in io.progress_bar_generator(input_path_image_paths, "Collecting info"):
                 filepath = Path(filepath)
-
-                if filepath.suffix == '.png':
-                    dflimg = DFLPNG.load( str(filepath) )
-                elif filepath.suffix == '.jpg':
-                    dflimg = DFLJPG.load ( str(filepath) )
-                else:
-                    dflimg = None
-
+                
+                dflimg = DFLIMG.load(filepath)
                 if dflimg is None:
                     io.log_err ("%s is not a dfl image file" % (filepath.name) )
                     continue

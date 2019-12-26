@@ -1,22 +1,22 @@
-import os
-import sys
-import time
-import argparse
-import multiprocessing
-from utils import Path_utils
-from utils import os_utils
-from pathlib import Path
-
-if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 6):
-    raise Exception("This program requires at least Python 3.6")
-
-class fixPathAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, os.path.abspath(os.path.expanduser(values)))
-
 if __name__ == "__main__":
+    import os
+    import sys
+    import time
+    import argparse
+    import multiprocessing
     multiprocessing.set_start_method("spawn")
+    from utils import Path_utils
+    from utils import os_utils
+    from pathlib import Path
+    from interact import interact as io
 
+    if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 6):
+        raise Exception("This program requires at least Python 3.6")
+
+    class fixPathAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            setattr(namespace, self.dest, os.path.abspath(os.path.expanduser(values)))
+    
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
@@ -66,8 +66,8 @@ if __name__ == "__main__":
 
     def process_dev_extract_umd_csv(arguments):
         os_utils.set_process_lowest_prio()
-        from mainscripts import Extractor
-        Extractor.extract_umd_csv( arguments.input_csv_file,
+        from mainscripts import dev_misc
+        dev_misc.extract_umd_csv( arguments.input_csv_file,
                                   device_args={'cpu_only'  : arguments.cpu_only,
                                                'multi_gpu' : arguments.multi_gpu,
                                               }
@@ -88,23 +88,16 @@ if __name__ == "__main__":
     p = subparsers.add_parser( "dev_apply_celebamaskhq", help="")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir")
     p.set_defaults (func=process_dev_apply_celebamaskhq)
-    """
-    def process_extract_fanseg(arguments):
+
+    def process_dev_test(arguments):
         os_utils.set_process_lowest_prio()
-        from mainscripts import Extractor
-        Extractor.extract_fanseg( arguments.input_dir,
-                                  device_args={'cpu_only'  : arguments.cpu_only,
-                                               'multi_gpu' : arguments.multi_gpu,
-                                              }
-                                )
+        from mainscripts import dev_misc
+        dev_misc.dev_test( arguments.input_dir )
 
-    p = subparsers.add_parser( "extract_fanseg", help="Extract fanseg mask from faces.")
-    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
-    p.add_argument('--multi-gpu', action="store_true", dest="multi_gpu", default=False, help="Enables multi GPU.")
-    p.add_argument('--cpu-only', action="store_true", dest="cpu_only", default=False, help="Extract on CPU.")
-    p.set_defaults (func=process_extract_fanseg)
-    """
-
+    p = subparsers.add_parser( "dev_test", help="")
+    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir")
+    p.set_defaults (func=process_dev_test)
+    
     def process_sort(arguments):
         os_utils.set_process_lowest_prio()
         from mainscripts import Sorter
@@ -112,7 +105,7 @@ if __name__ == "__main__":
 
     p = subparsers.add_parser( "sort", help="Sort faces in a directory.")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
-    p.add_argument('--by', required=True, dest="sort_by_method", choices=("blur", "face", "face-dissim", "face-yaw", "face-pitch", "hist", "hist-dissim", "brightness", "hue", "black", "origname", "oneface", "final", "final-no-blur", "vggface", "test"), help="Method of sorting. 'origname' sort by original filename to recover original sequence." )
+    p.add_argument('--by', required=True, dest="sort_by_method", choices=("blur", "face", "face-dissim", "face-yaw", "face-pitch", "hist", "hist-dissim", "brightness", "hue", "black", "origname", "oneface", "final", "final-no-blur", "vggface", "absdiff", "test"), help="Method of sorting. 'origname' sort by original filename to recover original sequence." )
     p.set_defaults (func=process_sort)
 
     def process_util(arguments):
@@ -133,7 +126,23 @@ if __name__ == "__main__":
 
         if arguments.remove_ie_polys:
             Util.remove_ie_polys_folder (input_path=arguments.input_dir)
+    
+        if arguments.save_faceset_metadata:
+            Util.save_faceset_metadata_folder (input_path=arguments.input_dir)
+            
+        if arguments.restore_faceset_metadata:
+            Util.restore_faceset_metadata_folder (input_path=arguments.input_dir)
+            
+        if arguments.pack_faceset:            
+            io.log_info ("Performing faceset packing...\r\n")
+            from samplelib import PackedFaceset
+            PackedFaceset.pack( Path(arguments.input_dir) )
 
+        if arguments.unpack_faceset:
+            io.log_info ("Performing faceset unpacking...\r\n")
+            from samplelib import PackedFaceset
+            PackedFaceset.unpack( Path(arguments.input_dir) )
+            
     p = subparsers.add_parser( "util", help="Utilities.")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
     p.add_argument('--convert-png-to-jpg', action="store_true", dest="convert_png_to_jpg", default=False, help="Convert DeepFaceLAB PNG files to JPEG.")
@@ -141,6 +150,10 @@ if __name__ == "__main__":
     p.add_argument('--recover-original-aligned-filename', action="store_true", dest="recover_original_aligned_filename", default=False, help="Recover original aligned filename.")
     #p.add_argument('--remove-fanseg', action="store_true", dest="remove_fanseg", default=False, help="Remove fanseg mask from aligned faces.")
     p.add_argument('--remove-ie-polys', action="store_true", dest="remove_ie_polys", default=False, help="Remove ie_polys from aligned faces.")
+    p.add_argument('--save-faceset-metadata', action="store_true", dest="save_faceset_metadata", default=False, help="Save faceset metadata to file.")
+    p.add_argument('--restore-faceset-metadata', action="store_true", dest="restore_faceset_metadata", default=False, help="Restore faceset metadata to file. Image filenames must be the same as used with save.")
+    p.add_argument('--pack-faceset', action="store_true", dest="pack_faceset", default=False, help="")
+    p.add_argument('--unpack-faceset', action="store_true", dest="unpack_faceset", default=False, help="")
 
     p.set_defaults (func=process_util)
 
@@ -274,10 +287,12 @@ if __name__ == "__main__":
     p.set_defaults(func=process_labelingtool_edit_mask)
 
     def process_relight_faceset(arguments):
+        os_utils.set_process_lowest_prio()
         from mainscripts import FacesetRelighter
         FacesetRelighter.relight (arguments.input_dir, arguments.lighten, arguments.random_one)
 
     def process_delete_relighted(arguments):
+        os_utils.set_process_lowest_prio()
         from mainscripts import FacesetRelighter
         FacesetRelighter.delete_relighted (arguments.input_dir)
 

@@ -92,6 +92,8 @@ Model = keras.models.Model
 
 Adam = nnlib.Adam
 RMSprop = nnlib.RMSprop
+LookaheadOptimizer = nnlib.LookaheadOptimizer
+SGD = nnlib.keras.optimizers.SGD
 
 modelify = nnlib.modelify
 gaussian_blur = nnlib.gaussian_blur
@@ -764,9 +766,10 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                               2 - allows to train x3 bigger network on same VRAM consuming RAM*2 and CPU power.
             """
 
-            def __init__(self, learning_rate=0.001, rho=0.9, tf_cpu_mode=0, **kwargs):
+            def __init__(self, learning_rate=0.001, rho=0.9, lr_dropout=0, tf_cpu_mode=0, **kwargs):
                 self.initial_decay = kwargs.pop('decay', 0.0)
                 self.epsilon = kwargs.pop('epsilon', K.epsilon())
+                self.lr_dropout = lr_dropout
                 self.tf_cpu_mode = tf_cpu_mode
 
                 learning_rate = kwargs.pop('lr', learning_rate)
@@ -787,6 +790,8 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                                 dtype=K.dtype(p),
                                 name='accumulator_' + str(i))
                                 for (i, p) in enumerate(params)]
+                if self.lr_dropout != 0:
+                    lr_rnds = [ K.random_binomial(K.int_shape(p), p=self.lr_dropout, dtype=K.dtype(p)) for p in params ]
                 if e: e.__exit__(None, None, None)
 
                 self.weights = [self.iterations] + accumulators
@@ -797,12 +802,15 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                     lr = lr * (1. / (1. + self.decay * K.cast(self.iterations,
                                                             K.dtype(self.decay))))
 
-                for p, g, a in zip(params, grads, accumulators):
+                for i, (p, g, a) in enumerate(zip(params, grads, accumulators)):
                     # update accumulator
                     e = K.tf.device("/cpu:0") if self.tf_cpu_mode == 2 else None
                     if e: e.__enter__()
                     new_a = self.rho * a + (1. - self.rho) * K.square(g)
-                    new_p = p - lr * g / (K.sqrt(new_a) + self.epsilon)
+                    p_diff = - lr * g / (K.sqrt(new_a) + self.epsilon)
+                    if self.lr_dropout != 0:
+                        p_diff *= lr_rnds[i]
+                    new_p = p + p_diff
                     if e: e.__exit__(None, None, None)
 
                     self.updates.append(K.update(a, new_a))
@@ -827,7 +835,8 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 config = {'learning_rate': float(K.get_value(self.learning_rate)),
                         'rho': float(K.get_value(self.rho)),
                         'decay': float(K.get_value(self.decay)),
-                        'epsilon': self.epsilon}
+                        'epsilon': self.epsilon,
+                        'lr_dropout' : self.lr_dropout }
                 base_config = super(RMSprop, self).get_config()
                 return dict(list(base_config.items()) + list(config.items()))
         nnlib.RMSprop = RMSprop
@@ -846,6 +855,7 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 amsgrad: boolean. Whether to apply the AMSGrad variant of this
                     algorithm from the paper "On the Convergence of Adam and
                     Beyond".
+                lr_dropout: float [0.0 .. 1.0] Learning rate dropout https://arxiv.org/pdf/1912.00144
                 tf_cpu_mode: only for tensorflow backend
                               0 - default, no changes.
                               1 - allows to train x2 bigger network on same VRAM consuming RAM
@@ -859,7 +869,7 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
             """
 
             def __init__(self, lr=0.001, beta_1=0.9, beta_2=0.999,
-                         epsilon=None, decay=0., amsgrad=False, tf_cpu_mode=0, **kwargs):
+                         epsilon=None, decay=0., amsgrad=False, lr_dropout=0, tf_cpu_mode=0, **kwargs):
                 super(Adam, self).__init__(**kwargs)
                 with K.name_scope(self.__class__.__name__):
                     self.iterations = K.variable(0, dtype='int64', name='iterations')
@@ -872,6 +882,7 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 self.epsilon = epsilon
                 self.initial_decay = decay
                 self.amsgrad = amsgrad
+                self.lr_dropout = lr_dropout
                 self.tf_cpu_mode = tf_cpu_mode
 
             def get_updates(self, loss, params):
@@ -895,11 +906,16 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                     vhats = [K.zeros(K.int_shape(p), dtype=K.dtype(p)) for p in params]
                 else:
                     vhats = [K.zeros(1) for _ in params]
+
+
+                if self.lr_dropout != 0:
+                    lr_rnds = [ K.random_binomial(K.int_shape(p), p=self.lr_dropout, dtype=K.dtype(p)) for p in params ]
+
                 if e: e.__exit__(None, None, None)
 
                 self.weights = [self.iterations] + ms + vs + vhats
 
-                for p, g, m, v, vhat in zip(params, grads, ms, vs, vhats):
+                for i, (p, g, m, v, vhat) in enumerate( zip(params, grads, ms, vs, vhats) ):
                     e = K.tf.device("/cpu:0") if self.tf_cpu_mode == 2 else None
                     if e: e.__enter__()
                     m_t = (self.beta_1 * m) + (1. - self.beta_1) * g
@@ -911,13 +927,16 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                     if e: e.__exit__(None, None, None)
 
                     if self.amsgrad:
-                        p_t = p - lr_t * m_t / (K.sqrt(vhat_t) + self.epsilon)
+                        p_diff = - lr_t * m_t / (K.sqrt(vhat_t) + self.epsilon)
                     else:
-                        p_t = p - lr_t * m_t / (K.sqrt(v_t) + self.epsilon)
+                        p_diff = - lr_t * m_t / (K.sqrt(v_t) + self.epsilon)
+
+                    if self.lr_dropout != 0:
+                        p_diff *= lr_rnds[i]
 
                     self.updates.append(K.update(m, m_t))
                     self.updates.append(K.update(v, v_t))
-                    new_p = p_t
+                    new_p = p + p_diff
 
                     # Apply constraints.
                     if getattr(p, 'constraint', None) is not None:
@@ -932,10 +951,89 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                           'beta_2': float(K.get_value(self.beta_2)),
                           'decay': float(K.get_value(self.decay)),
                           'epsilon': self.epsilon,
-                          'amsgrad': self.amsgrad}
+                          'amsgrad': self.amsgrad,
+                          'lr_dropout' : self.lr_dropout}
                 base_config = super(Adam, self).get_config()
                 return dict(list(base_config.items()) + list(config.items()))
         nnlib.Adam = Adam
+
+        class LookaheadOptimizer(keras.optimizers.Optimizer):
+            def __init__(self, optimizer, sync_period=5, slow_step=0.5, tf_cpu_mode=0, **kwargs):
+                super(LookaheadOptimizer, self).__init__(**kwargs)
+                self.optimizer = optimizer
+                self.tf_cpu_mode = tf_cpu_mode
+
+                with K.name_scope(self.__class__.__name__):
+                    self.sync_period = K.variable(sync_period, dtype='int64', name='sync_period')
+                    self.slow_step = K.variable(slow_step, name='slow_step')
+
+            @property
+            def lr(self):
+                return self.optimizer.lr
+
+            @lr.setter
+            def lr(self, lr):
+                self.optimizer.lr = lr
+
+            @property
+            def learning_rate(self):
+                return self.optimizer.learning_rate
+
+            @learning_rate.setter
+            def learning_rate(self, learning_rate):
+                self.optimizer.learning_rate = learning_rate
+
+            @property
+            def iterations(self):
+                return self.optimizer.iterations
+
+            def get_updates(self, loss, params):
+                sync_cond = K.equal((self.iterations + 1) // self.sync_period * self.sync_period, (self.iterations + 1))
+
+                e = K.tf.device("/cpu:0") if self.tf_cpu_mode > 0 else None
+                if e: e.__enter__()
+                slow_params = [K.variable(K.get_value(p), name='sp_{}'.format(i)) for i, p in enumerate(params)]
+                if e: e.__exit__(None, None, None)
+
+
+                self.updates = self.optimizer.get_updates(loss, params)
+                slow_updates = []
+                for p, sp in zip(params, slow_params):
+
+                    e = K.tf.device("/cpu:0") if self.tf_cpu_mode == 2 else None
+                    if e: e.__enter__()
+                    sp_t = sp + self.slow_step * (p - sp)
+                    if e: e.__exit__(None, None, None)
+
+                    slow_updates.append(K.update(sp, K.switch(
+                        sync_cond,
+                        sp_t,
+                        sp,
+                    )))
+                    slow_updates.append(K.update_add(p, K.switch(
+                        sync_cond,
+                        sp_t - p,
+                        K.zeros_like(p),
+                    )))
+
+                self.updates += slow_updates
+                self.weights = self.optimizer.weights + slow_params
+                return self.updates
+
+            def get_config(self):
+                config = {
+                    'optimizer': keras.optimizers.serialize(self.optimizer),
+                    'sync_period': int(K.get_value(self.sync_period)),
+                    'slow_step': float(K.get_value(self.slow_step)),
+                }
+                base_config = super(LookaheadOptimizer, self).get_config()
+                return dict(list(base_config.items()) + list(config.items()))
+
+            @classmethod
+            def from_config(cls, config):
+                optimizer = keras.optimizers.deserialize(config.pop('optimizer'))
+                return cls(optimizer, **config)
+        nnlib.LookaheadOptimizer = LookaheadOptimizer
 
         class DenseMaxout(keras.layers.Layer):
             """A dense maxout layer.

@@ -83,7 +83,7 @@ class SAEModel(ModelBase):
                                                                                help_message="Learn to transfer image around face. This can make face more like dst. Enabling this option increases the chance of model collapse."), 0.0, 100.0 )
 
             default_ct_mode = self.options.get('ct_mode', 'none')
-            self.options['ct_mode'] = io.input_str (f"Color transfer mode apply to src faceset. ( none/rct/lct/mkl/idt, ?:help skip:{default_ct_mode}) : ", default_ct_mode, ['none','rct','lct','mkl','idt'], help_message="Change color distribution of src samples close to dst samples. Try all modes to find the best.")
+            self.options['ct_mode'] = io.input_str (f"Color transfer mode apply to src faceset. ( none/rct/lct/mkl/idt/sot, ?:help skip:{default_ct_mode}) : ", default_ct_mode, ['none','rct','lct','mkl','idt','sot'], help_message="Change color distribution of src samples close to dst samples. Try all modes to find the best.")
             
             if nnlib.device.backend != 'plaidML': # todo https://github.com/plaidml/plaidml/issues/301
                 default_clipgrad = False if is_first_run else self.options.get('clipgrad', False)
@@ -466,18 +466,15 @@ class SAEModel(ModelBase):
 
             training_data_src_path = self.training_data_src_path
             training_data_dst_path = self.training_data_dst_path
-            sort_by_yaw = self.sort_by_yaw
 
             if self.pretrain and self.pretraining_data_path is not None:
                 training_data_src_path = self.pretraining_data_path
                 training_data_dst_path = self.pretraining_data_path
-                sort_by_yaw = False
 
             self.set_training_data_generators ([
-                    SampleGeneratorFace(training_data_src_path, sort_by_yaw_target_samples_path=training_data_dst_path if sort_by_yaw else None,
-                                                                random_ct_samples_path=training_data_dst_path if self.options['ct_mode'] != 'none' else None,
+                    SampleGeneratorFace(training_data_src_path, random_ct_samples_path=training_data_dst_path if self.options['ct_mode'] != 'none' else None,
                                                                 debug=self.is_debug(), batch_size=self.batch_size,
-                        sample_process_options=SampleProcessor.Options(random_flip=self.random_flip, scale_range=np.array([-0.05, 0.05])+self.src_scale_mod / 100.0 ),
+                        sample_process_options=SampleProcessor.Options(random_flip=self.random_flip, scale_range=np.array([-0.05, 0.05]) ),
                         output_sample_types = [ {'types' : (t.IMG_WARPED_TRANSFORMED, face_type, t_mode_bgr), 'resolution':resolution, 'ct_mode': self.options['ct_mode'] },
                                                 {'types' : (t.IMG_TRANSFORMED, face_type, t_mode_bgr), 'resolution': resolution, 'ct_mode': self.options['ct_mode'] },
                                                 {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_M), 'resolution': resolution } ]
@@ -564,7 +561,7 @@ class SAEModel(ModelBase):
 
         import converters
         return self.predictor_func, (self.options['resolution'], self.options['resolution'], 3), converters.ConverterConfigMasked(face_type=face_type,
-                                     default_mode = 1 if self.options['ct_mode'] != 'none' or self.options['face_style_power'] or self.options['bg_style_power'] else 4,
+                                     default_mode = 'overlay' if self.options['ct_mode'] != 'none' or self.options['face_style_power'] or self.options['bg_style_power'] else 'seamless',
                                      clip_hborder_mask_per=0.0625 if (self.options['face_type'] == 'f') else 0,
                                     )
 

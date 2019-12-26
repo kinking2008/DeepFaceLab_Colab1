@@ -13,9 +13,7 @@ class Model(ModelBase):
                             ask_enable_autobackup=False,
                             ask_write_preview_history=False, 
                             ask_target_iter=False,
-                            ask_sort_by_yaw=False,
-                            ask_random_flip=False,
-                            ask_src_scale_mod=False)
+                            ask_random_flip=False)
     
     #override
     def onInitializeOptions(self, is_first_run, ask_override):            
@@ -34,7 +32,6 @@ class Model(ModelBase):
         self.face_type = FaceType.FULL if self.options['face_type'] == 'f' else FaceType.HALF
 
         model_name = 'FANSeg'
-        model_name = 'FANCHQ'
         self.fan_seg = TernausNet(model_name, self.resolution, 
                                             FaceType.toString(self.face_type), 
                                             load_weights=not self.is_first_run(),
@@ -48,13 +45,13 @@ class Model(ModelBase):
             self.set_training_data_generators ([    
                     SampleGeneratorFace(self.training_data_src_path, debug=self.is_debug(), batch_size=self.batch_size, 
                             sample_process_options=SampleProcessor.Options(random_flip=True), 
-                            output_sample_types=[ { 'types': (t.IMG_WARPED_TRANSFORMED, face_type, t.MODE_BGR), 'resolution' : self.resolution, 'motion_blur':(25, 5),  'gaussian_blur':(25,5), 'border_replicate':False, 'random_hsv_shift' : True },
+                            output_sample_types=[ { 'types': (t.IMG_WARPED_TRANSFORMED, face_type, t.MODE_BGR_RANDOM_HSV_SHIFT), 'resolution' : self.resolution, 'motion_blur':(25, 5),  'gaussian_blur':(25,5), 'border_replicate':False},
                                                   { 'types': (t.IMG_WARPED_TRANSFORMED, face_type, t.MODE_M), 'resolution': self.resolution },
                                                 ]),
                                                 
                     SampleGeneratorFace(self.training_data_dst_path, debug=self.is_debug(), batch_size=self.batch_size, 
                             sample_process_options=SampleProcessor.Options(random_flip=True ), 
-                            output_sample_types=[ { 'types': (t.IMG_TRANSFORMED , face_type, t.MODE_BGR), 'resolution' : self.resolution, 'random_hsv_shift' : True},
+                            output_sample_types=[ { 'types': (t.IMG_TRANSFORMED , face_type, t.MODE_BGR_RANDOM_HSV_SHIFT), 'resolution' : self.resolution},
                                                 ])
                                                ])
                 
