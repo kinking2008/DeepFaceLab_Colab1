@@ -1,15 +1,18 @@
+import contextlib
+import multiprocessing
 import os
 import sys
-import contextlib
+from pathlib import Path
+
 import numpy as np
 
-from .CAInitializer import CAGenerateWeights
-import multiprocessing
-from joblib import Subprocessor
-
-from utils import std_utils
-from .device import device
 from interact import interact as io
+from joblib import Subprocessor
+from utils import std_utils
+
+from .CAInitializer import CAGenerateWeights
+from .device import device
+
 
 class nnlib(object):
     device = device #forwards nnlib.devicelib to device in order to use nnlib as standalone lib
@@ -70,6 +73,7 @@ PixelNormalization = nnlib.PixelNormalization
 Activation = KL.Activation
 LeakyReLU = KL.LeakyReLU
 ELU = KL.ELU
+GeLU = nnlib.GeLU
 ReLU = KL.ReLU
 PReLU = KL.PReLU
 tanh = KL.Activation('tanh')
@@ -172,6 +176,11 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
             os.environ.pop('CUDA_VISIBLE_DEVICES')
 
         os.environ['CUDA_​CACHE_​MAXSIZE'] = '536870912' #512Mb (32mb default)
+        
+        if sys.platform[0:3] == 'win':
+            if len(device_config.gpu_idxs) == 1:
+                os.environ['CUDA_CACHE_PATH'] = \
+                  str(Path(os.environ['APPDATA']) / 'NVIDIA' / ('ComputeCache_' + device_config.gpu_names[0].replace(' ','_')))
 
         os.environ['TF_MIN_GPU_MULTIPROCESSOR_COUNT'] = '2'
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' #tf log errors only
@@ -1299,6 +1308,37 @@ NLayerDiscriminator = nnlib.NLayerDiscriminator
                 base_config = super(DenseMaxout, self).get_config()
                 return dict(list(base_config.items()) + list(config.items()))
         nnlib.DenseMaxout = DenseMaxout
+        
+        class GeLU(KL.Layer):
+            """Gaussian Error Linear Unit.
+            A smoother version of ReLU generally used
+            in the BERT or BERT architecture based models.
+            Original paper: https://arxiv.org/abs/1606.08415
+            Input shape:
+                Arbitrary. Use the keyword argument `input_shape`
+                (tuple of integers, does not include the samples axis)
+                when using this layer as the first layer in a model.
+            Output shape:
+                Same shape as the input.
+            """
+
+            def __init__(self, approximate=True, **kwargs):
+                super(GeLU, self).__init__(**kwargs)
+                self.approximate = approximate
+                self.supports_masking = True
+
+            def call(self, inputs):
+                cdf = 0.5 * (1.0 + K.tanh((np.sqrt(2 / np.pi) * (inputs + 0.044715 * K.pow(inputs, 3)))))
+                return inputs * cdf
+
+            def get_config(self):
+                config = {'approximate': self.approximate}
+                base_config = super(GeLU, self).get_config()
+                return dict(list(base_config.items()) + list(config.items()))
+
+            def compute_output_shape(self, input_shape):
+                return input_shape
+        nnlib.GeLU = GeLU
 
         def CAInitializerMP( conv_weights_list ):
             #Convolution Aware Initialization https://arxiv.org/abs/1702.06295
