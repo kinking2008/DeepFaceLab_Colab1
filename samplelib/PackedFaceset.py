@@ -3,10 +3,10 @@ import shutil
 import struct
 from pathlib import Path
 
-import samplelib.SampleHost
-from interact import interact as io
+import samplelib.SampleLoader
+from core.interact import interact as io
 from samplelib import Sample
-from utils import Path_utils
+from core import pathex
 
 packed_faceset_filename = 'faceset.pak'
 
@@ -19,22 +19,22 @@ class PackedFaceset():
 
         if samples_dat_path.exists():
             io.log_info(f"{samples_dat_path} : file already exists !")
-            io.input_bool("Press enter to continue and overwrite.", False)
+            io.input("Press enter to continue and overwrite.")
 
         as_person_faceset = False
-        dir_names = Path_utils.get_all_dir_names(samples_path)
+        dir_names = pathex.get_all_dir_names(samples_path)
         if len(dir_names) != 0:
-            as_person_faceset = io.input_bool(f"{len(dir_names)} subdirectories found, process as person faceset? (y/n) skip:y : ", True)
+            as_person_faceset = io.input_bool(f"{len(dir_names)} subdirectories found, process as person faceset?", True)
 
         if as_person_faceset:
             image_paths = []
 
             for dir_name in dir_names:
-                image_paths += Path_utils.get_image_paths(samples_path / dir_name)
+                image_paths += pathex.get_image_paths(samples_path / dir_name)
         else:
-            image_paths = Path_utils.get_image_paths(samples_path)
+            image_paths = pathex.get_image_paths(samples_path)
 
-        samples = samplelib.SampleHost.load_face_samples(image_paths)
+        samples = samplelib.SampleLoader.load_face_samples(image_paths)
         samples_len = len(samples)
 
         samples_configs = []
@@ -136,6 +136,7 @@ class PackedFaceset():
         samples_configs = pickle.loads ( f.read(sizeof_samples_bytes) )
         samples = []
         for sample_config in samples_configs:
+            sample_config = pickle.loads(pickle.dumps (sample_config))
             samples.append ( Sample (**sample_config) )
 
         offsets = [ struct.unpack("Q", f.read(8) )[0] for _ in range(len(samples)+1) ]

@@ -1,104 +1,115 @@
+import multiprocessing
 import operator
+import pickle
 import traceback
-from enum import IntEnum
 from pathlib import Path
 
-import cv2
-import numpy as np
-
+import samplelib.PackedFaceset
+from core import pathex
+from core.interact import interact as io
+from core.joblib import Subprocessor
+from DFLIMG import *
 from facelib import FaceType, LandmarksProcessor
-from interact import interact as io
-from utils import Path_utils
-from utils.DFLJPG import DFLJPG
-from utils.DFLPNG import DFLPNG
 
 from .Sample import Sample, SampleType
 
 
 class SampleLoader:
-    cache = dict()
-
+    samples_cache = dict()
     @staticmethod
     def get_person_id_max_count(samples_path):
-        return len ( Path_utils.get_all_dir_names(samples_path) )
+        samples = None
+        try:
+            samples = samplelib.PackedFaceset.load(samples_path)
+        except:
+            io.log_err(f"Error occured while loading samplelib.PackedFaceset.load {str(samples_dat_path)}, {traceback.format_exc()}")
+
+        if samples is None:
+            raise ValueError("packed faceset not found.")
+        persons_name_idxs = {}
+        for sample in samples:
+            persons_name_idxs[sample.person_name] = 0
+        return len(list(persons_name_idxs.keys()))
 
     @staticmethod
-    def load(sample_type, samples_path, target_samples_path=None, person_id_mode=False):
-        cache = SampleLoader.cache
+    def load(sample_type, samples_path):
+        samples_cache = SampleLoader.samples_cache
 
-        if str(samples_path) not in cache.keys():
-            cache[str(samples_path)] = [None]*SampleType.QTY
+        if str(samples_path) not in samples_cache.keys():
+            samples_cache[str(samples_path)] = [None]*SampleType.QTY
 
-        datas = cache[str(samples_path)]
+        samples = samples_cache[str(samples_path)]
 
         if            sample_type == SampleType.IMAGE:
-            if  datas[sample_type] is None:
-                datas[sample_type] = [ Sample(filename=filename) for filename in io.progress_bar_generator( Path_utils.get_image_paths(samples_path), "Loading") ]
+            if  samples[sample_type] is None:
+                samples[sample_type] = [ Sample(filename=filename) for filename in io.progress_bar_generator( pathex.get_image_paths(samples_path), "Loading") ]
+
         elif          sample_type == SampleType.FACE:
-            if  datas[sample_type] is None:
-                if person_id_mode:
-                    dir_names = Path_utils.get_all_dir_names(samples_path)
-                    all_samples = []
-                    for i, dir_name in io.progress_bar_generator( [*enumerate(dir_names)] , "Loading"):
-                        all_samples += SampleLoader.upgradeToFaceSamples( [ Sample(filename=filename, person_id=i) for filename in Path_utils.get_image_paths( samples_path / dir_name  ) ], silent=True )
-                    datas[sample_type] = all_samples
-                else:
-                    datas[sample_type] = SampleLoader.upgradeToFaceSamples( [ Sample(filename=filename) for filename in Path_utils.get_image_paths(samples_path) ] )
+            if  samples[sample_type] is None:
+                try:
+                    result = samplelib.PackedFaceset.load(samples_path)
+                except:
+                    io.log_err(f"Error occured while loading samplelib.PackedFaceset.load {str(samples_dat_path)}, {traceback.format_exc()}")
+
+                if result is not None:
+                    io.log_info (f"Loaded {len(result)} packed faces from {samples_path}")
+
+                if result is None:
+                    result = SampleLoader.load_face_samples( pathex.get_image_paths(samples_path) )
+                samples[sample_type] = result
 
         elif          sample_type == SampleType.FACE_TEMPORAL_SORTED:
-            if  datas[sample_type] is None:
-                datas[sample_type] = SampleLoader.upgradeToFaceTemporalSortedSamples( SampleLoader.load(SampleType.FACE, samples_path) )
+                result = SampleLoader.load (SampleType.FACE, samples_path)
+                result = SampleLoader.upgradeToFaceTemporalSortedSamples(result)
+                samples[sample_type] = result
 
-        elif          sample_type == SampleType.FACE_YAW_SORTED:
-            if  datas[sample_type] is None:
-                datas[sample_type] = SampleLoader.upgradeToFaceYawSortedSamples( SampleLoader.load(SampleType.FACE, samples_path) )
-
-        elif          sample_type == SampleType.FACE_YAW_SORTED_AS_TARGET:
-            if  datas[sample_type] is None:
-                if target_samples_path is None:
-                    raise Exception('target_samples_path is None for FACE_YAW_SORTED_AS_TARGET')
-                datas[sample_type] = SampleLoader.upgradeToFaceYawSortedAsTargetSamples( SampleLoader.load(SampleType.FACE_YAW_SORTED, samples_path), SampleLoader.load(SampleType.FACE_YAW_SORTED, target_samples_path) )
-
-        return datas[sample_type]
+        return samples[sample_type]
 
     @staticmethod
-    def upgradeToFaceSamples ( samples, silent=False ):
+    def load_face_samples ( image_paths):
+        result = FaceSamplesLoaderSubprocessor(image_paths).run()
         sample_list = []
 
-        for s in (samples if silent else io.progress_bar_generator(samples, "Loading")):
-            s_filename_path = Path(s.filename)
-            try:
-                if s_filename_path.suffix == '.png':
-                    dflimg = DFLPNG.load ( str(s_filename_path) )
-                elif s_filename_path.suffix == '.jpg':
-                    dflimg = DFLJPG.load ( str(s_filename_path) )
-                else:
-                    dflimg = None
-
-                if dflimg is None:
-                    print ("%s is not a dfl image file required for training" % (s_filename_path.name) )
-                    continue
-
-                landmarks = dflimg.get_landmarks()
-                pitch_yaw_roll = dflimg.get_pitch_yaw_roll()
-                eyebrows_expand_mod = dflimg.get_eyebrows_expand_mod()
-
-                if pitch_yaw_roll is None:
-                    pitch_yaw_roll = LandmarksProcessor.estimate_pitch_yaw_roll(landmarks)
-
-                sample_list.append( s.copy_and_set(sample_type=SampleType.FACE,
-                                                   face_type=FaceType.fromString (dflimg.get_face_type()),
-                                                   shape=dflimg.get_shape(),
-                                                   landmarks=landmarks,
-                                                   ie_polys=dflimg.get_ie_polys(),
-                                                   pitch_yaw_roll=pitch_yaw_roll,
-                                                   eyebrows_expand_mod=eyebrows_expand_mod,
-                                                   source_filename=dflimg.get_source_filename(),
-                                                   fanseg_mask_exist=dflimg.get_fanseg_mask() is not None, ) )
-            except:
-                print ("Unable to load %s , error: %s" % (str(s_filename_path), traceback.format_exc() ) )
-
+        for filename, \
+                ( face_type,
+                  shape,
+                  landmarks,
+                  ie_polys,
+                  eyebrows_expand_mod,
+                  source_filename,
+                ) in result:
+            sample_list.append( Sample(filename=filename,
+                                        sample_type=SampleType.FACE,
+                                        face_type=FaceType.fromString (face_type),
+                                        shape=shape,
+                                        landmarks=landmarks,
+                                        ie_polys=ie_polys,
+                                        eyebrows_expand_mod=eyebrows_expand_mod,
+                                        source_filename=source_filename,
+                                    ))
         return sample_list
+
+    """
+    @staticmethod
+    def load_face_samples ( image_paths):
+        sample_list = []
+
+        for filename in io.progress_bar_generator (image_paths, desc="Loading"):
+            dflimg = DFLIMG.load (Path(filename))
+            if dflimg is None:
+                io.log_err (f"{filename} is not a dfl image file.")
+            else:
+                sample_list.append( Sample(filename=filename,
+                                           sample_type=SampleType.FACE,
+                                           face_type=FaceType.fromString ( dflimg.get_face_type() ),
+                                           shape=dflimg.get_shape(),
+                                           landmarks=dflimg.get_landmarks(),
+                                           ie_polys=dflimg.get_ie_polys(),
+                                           eyebrows_expand_mod=dflimg.get_eyebrows_expand_mod(),
+                                           source_filename=dflimg.get_source_filename(),
+                                    ))
+        return sample_list
+    """
 
     @staticmethod
     def upgradeToFaceTemporalSortedSamples( samples ):
@@ -107,58 +118,71 @@ class SampleLoader:
 
         return [ s[0] for s in new_s]
 
-    @staticmethod
-    def upgradeToFaceYawSortedSamples( samples ):
 
-        lowest_yaw, highest_yaw = -1.0, 1.0
-        gradations = 64
-        diff_rot_per_grad = abs(highest_yaw-lowest_yaw) / gradations
+class FaceSamplesLoaderSubprocessor(Subprocessor):
+    #override
+    def __init__(self, image_paths ):
+        self.image_paths = image_paths
+        self.image_paths_len = len(image_paths)
+        self.idxs = [*range(self.image_paths_len)]
+        self.result = [None]*self.image_paths_len
+        super().__init__('FaceSamplesLoader', FaceSamplesLoaderSubprocessor.Cli, 60)
 
-        yaws_sample_list = [None]*gradations
+    #override
+    def on_clients_initialized(self):
+        io.progress_bar ("Loading samples", len (self.image_paths))
 
-        for i in io.progress_bar_generator(range(gradations), "Sorting"):
-            yaw = lowest_yaw + i*diff_rot_per_grad
-            next_yaw = lowest_yaw + (i+1)*diff_rot_per_grad
+    #override
+    def on_clients_finalized(self):
+        io.progress_bar_close()
 
-            yaw_samples = []
-            for s in samples:
-                s_yaw = s.pitch_yaw_roll[1]
-                if (i == 0            and s_yaw < next_yaw) or \
-                   (i  < gradations-1 and s_yaw >= yaw and s_yaw < next_yaw) or \
-                   (i == gradations-1 and s_yaw >= yaw):
-                    yaw_samples.append ( s.copy_and_set(sample_type=SampleType.FACE_YAW_SORTED) )
+    #override
+    def process_info_generator(self):
+        for i in range(min(multiprocessing.cpu_count(), 8) ):
+            yield 'CPU%d' % (i), {}, {}
 
-            if len(yaw_samples) > 0:
-                yaws_sample_list[i] = yaw_samples
+    #override
+    def get_data(self, host_dict):
+        if len (self.idxs) > 0:
+            idx = self.idxs.pop(0)
+            return idx, self.image_paths[idx]
 
-        return yaws_sample_list
+        return None
 
-    @staticmethod
-    def upgradeToFaceYawSortedAsTargetSamples (s, t):
-        l = len(s)
-        if l != len(t):
-            raise Exception('upgradeToFaceYawSortedAsTargetSamples() s_len != t_len')
-        b = l // 2
+    #override
+    def on_data_return (self, host_dict, data):
+        self.idxs.insert(0, data[0])
 
-        s_idxs = np.argwhere ( np.array ( [ 1 if x != None else 0  for x in s] ) == 1 )[:,0]
-        t_idxs = np.argwhere ( np.array ( [ 1 if x != None else 0  for x in t] ) == 1 )[:,0]
+    #override
+    def on_result (self, host_dict, data, result):
+        idx, dflimg = result
+        self.result[idx] = (self.image_paths[idx], dflimg)
+        io.progress_bar_inc(1)
 
-        new_s = [None]*l
+    #override
+    def get_result(self):
+        return self.result
 
-        for t_idx in t_idxs:
-            search_idxs = []
-            for i in range(0,l):
-                search_idxs += [t_idx - i, (l-t_idx-1) - i, t_idx + i, (l-t_idx-1) + i]
+    class Cli(Subprocessor.Cli):
+        #override
+        def process_data(self, data):
+            idx, filename = data
+            dflimg = DFLIMG.load (Path(filename))
 
-            for search_idx in search_idxs:
-                if search_idx in s_idxs:
-                    mirrored = ( t_idx != search_idx and ((t_idx < b and search_idx >= b) or (search_idx < b and t_idx >= b)) )
-                    new_s[t_idx] = [ sample.copy_and_set(sample_type=SampleType.FACE_YAW_SORTED_AS_TARGET,
-                                                         mirror=True,
-                                                         pitch_yaw_roll=(sample.pitch_yaw_roll[0],-sample.pitch_yaw_roll[1],sample.pitch_yaw_roll[2]),
-                                                         landmarks=LandmarksProcessor.mirror_landmarks (sample.landmarks, sample.shape[1] ))
-                                          for sample in s[search_idx]
-                                        ] if mirrored else s[search_idx]
-                    break
+            if dflimg is None:
+                self.log_err (f"FaceSamplesLoader: {filename} is not a dfl image file.")
+                data = None
+            else:
+                data = (dflimg.get_face_type(),
+                        dflimg.get_shape(),
+                        dflimg.get_landmarks(),
+                        dflimg.get_ie_polys(),
+                        dflimg.get_eyebrows_expand_mod(),
+                        dflimg.get_source_filename() )
 
-        return new_s
+            return idx, data
+
+        #override
+        def get_data_name (self, data):
+            #return string identificator of your data
+            return data[1]

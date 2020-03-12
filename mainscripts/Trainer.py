@@ -6,28 +6,31 @@ import time
 import numpy as np
 import itertools
 from pathlib import Path
-from utils import Path_utils
-import imagelib
+from core import pathex
+from core import imagelib
 import cv2
 import models
-from interact import interact as io
+from core.interact import interact as io
 
-def trainerThread (s2c, c2s, e, args, device_args):
+def trainerThread (s2c, c2s, e,
+                    model_class_name = None,
+                    saved_models_path = None,
+                    training_data_src_path = None,
+                    training_data_dst_path = None,
+                    pretraining_data_path = None,
+                    pretrained_model_path = None,
+                    no_preview=False,
+                    force_model_name=None,
+                    force_gpu_idxs=None,
+                    cpu_only=None,
+                    execute_programs = None,
+                    debug=False,
+                    **kwargs):
     while True:
         try:
             start_time = time.time()
 
-            training_data_src_path = Path( args.get('training_data_src_dir', '') )
-            training_data_dst_path = Path( args.get('training_data_dst_dir', '') )
-            
-            pretraining_data_path = args.get('pretraining_data_dir', '')
-            pretraining_data_path = Path(pretraining_data_path) if pretraining_data_path is not None else None
-            
-            model_path = Path( args.get('model_path', '') )
-            model_name = args.get('model_name', '')
             save_interval_min = 15
-            debug = args.get('debug', '')
-            execute_programs = args.get('execute_programs', [])
 
             if not training_data_src_path.exists():
                 io.log_err('Training data src directory does not exist.')
@@ -37,17 +40,22 @@ def trainerThread (s2c, c2s, e, args, device_args):
                 io.log_err('Training data dst directory does not exist.')
                 break
 
-            if not model_path.exists():
-                model_path.mkdir(exist_ok=True)
+            if not saved_models_path.exists():
+                saved_models_path.mkdir(exist_ok=True)
 
-            model = models.import_model(model_name)(
-                        model_path,
+            model = models.import_model(model_class_name)(
+                        is_training=True,
+                        saved_models_path=saved_models_path,
                         training_data_src_path=training_data_src_path,
                         training_data_dst_path=training_data_dst_path,
                         pretraining_data_path=pretraining_data_path,
-                        is_training=True,
+                        pretrained_model_path=pretrained_model_path,
+                        no_preview=no_preview,
+                        force_model_name=force_model_name,
+                        force_gpu_idxs=force_gpu_idxs,
+                        cpu_only=cpu_only,
                         debug=debug,
-                        device_args=device_args)
+                        )
 
             is_reached_goal = model.is_reached_iter_goal()
 
@@ -59,6 +67,10 @@ def trainerThread (s2c, c2s, e, args, device_args):
                     io.log_info ("Saving....", end='\r')
                     model.save()
                     shared_state['after_save'] = True
+                    
+            def model_backup():
+                if not debug and not is_reached_goal:
+                    model.create_backup()             
 
             def send_preview():
                 if not debug:
@@ -68,10 +80,6 @@ def trainerThread (s2c, c2s, e, args, device_args):
                     previews = [( 'debug, press update for new', model.debug_one_iter())]
                     c2s.put ( {'op':'show', 'previews': previews} )
                 e.set() #Set the GUI Thread as Ready
-
-
-            if model.is_first_run():
-                model_save()
 
             if model.get_target_iter() != 0:
                 if is_reached_goal:
@@ -94,11 +102,11 @@ def trainerThread (s2c, c2s, e, args, device_args):
                         exec_prog = False
                         if prog_time > 0 and (cur_time - start_time) >= prog_time:
                             x[0] = 0
-                            exec_prog = True                            
-                        elif prog_time < 0 and (cur_time - last_time)  >= -prog_time:
-                            x[2] = cur_time                            
                             exec_prog = True
-                            
+                        elif prog_time < 0 and (cur_time - last_time)  >= -prog_time:
+                            x[2] = cur_time
+                            exec_prog = True
+
                         if exec_prog:
                             try:
                                 exec(prog)
@@ -106,6 +114,12 @@ def trainerThread (s2c, c2s, e, args, device_args):
                                 print("Unable to execute program: %s" % (prog) )
 
                     if not is_reached_goal:
+
+                        if model.get_iter() == 0:
+                            io.log_info("")
+                            io.log_info("Trying to do the first iteration. If an error occurs, reduce the model parameters.")
+                            io.log_info("")
+
                         iter, iter_time = model.train_one_iter()
 
                         loss_history = model.get_loss_history()
@@ -117,9 +131,9 @@ def trainerThread (s2c, c2s, e, args, device_args):
 
                         if shared_state['after_save']:
                             shared_state['after_save'] = False
-                            last_save_time = time.time() #upd last_save_time only after save+one_iter, because plaidML rebuilds programs after save https://github.com/plaidml/plaidml/issues/274
+                            last_save_time = time.time()
 
-                            mean_loss = np.mean ( [ np.array(loss_history[i]) for i in range(save_iter, iter) ], axis=0)
+                            mean_loss = np.mean ( loss_history[save_iter:iter], axis=0)
 
                             for loss_value in mean_loss:
                                 loss_string += "[%.4f]" % (loss_value)
@@ -135,6 +149,9 @@ def trainerThread (s2c, c2s, e, args, device_args):
                                 io.log_info ('\r' + loss_string, end='')
                             else:
                                 io.log_info (loss_string, end='\r')
+
+                        if model.get_iter() == 1:
+                            model_save()
 
                         if model.get_target_iter() != 0 and model.is_reached_iter_goal():
                             io.log_info ('Reached target iteration.')
@@ -159,6 +176,8 @@ def trainerThread (s2c, c2s, e, args, device_args):
                     op = input['op']
                     if op == 'save':
                         model_save()
+                    elif op == 'backup':
+                        model_backup()
                     elif op == 'preview':
                         if is_reached_goal:
                             model.pass_one_iter()
@@ -183,16 +202,16 @@ def trainerThread (s2c, c2s, e, args, device_args):
 
 
 
-def main(args, device_args):
+def main(**kwargs):
     io.log_info ("Running trainer.\r\n")
 
-    no_preview = args.get('no_preview', False)
+    no_preview = kwargs.get('no_preview', False)
 
     s2c = queue.Queue()
     c2s = queue.Queue()
 
     e = threading.Event()
-    thread = threading.Thread(target=trainerThread, args=(s2c, c2s, e, args, device_args) )
+    thread = threading.Thread(target=trainerThread, args=(s2c, c2s, e), kwargs=kwargs )
     thread.start()
 
     e.wait() #Wait for inital load to occur.
@@ -264,7 +283,7 @@ def main(args, device_args):
 
                 # HEAD
                 head_lines = [
-                    '[s]:save [enter]:exit',
+                    '[s]:save [b]:backup [enter]:exit',
                     '[p]:update [space]:next preview [l]:change history range',
                     'Preview: "%s" [%d/%d]' % (selected_preview_name,selected_preview+1, len(previews) )
                     ]
@@ -301,6 +320,8 @@ def main(args, device_args):
                 s2c.put ( {'op': 'close'} )
             elif key == ord('s'):
                 s2c.put ( {'op': 'save'} )
+            elif key == ord('b'):
+                s2c.put ( {'op': 'backup'} )
             elif key == ord('p'):
                 if not is_waiting_preview:
                     is_waiting_preview = True

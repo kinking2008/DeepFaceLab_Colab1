@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 import numpy.linalg as npla
 
-import imagelib
-import mathlib
+from core import imagelib
+from core import mathlib
 from facelib import FaceType
-from imagelib import IEPolys
-from mathlib.umeyama import umeyama
+from core.imagelib import IEPolys
+from core.mathlib.umeyama import umeyama
 
 landmarks_2D = np.array([
 [ 0.000213256,  0.106454  ], #17
@@ -263,29 +263,29 @@ def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0, full_
     tb_diag_vec /= npla.norm(tb_diag_vec)
     bt_diag_vec = (l_p[1]-l_p[3]).astype(np.float32)
     bt_diag_vec /= npla.norm(bt_diag_vec)
-    
+
     mod = (1.0 / scale)* ( npla.norm(l_p[0]-l_p[2])*(padding*np.sqrt(2.0) + 0.5) )
-    
+
     if not remove_align:
-        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ), 
-                          np.round( l_c + bt_diag_vec*mod ), 
-                          np.round( l_c + tb_diag_vec*mod ) ] )    
+        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
+                          np.round( l_c + bt_diag_vec*mod ),
+                          np.round( l_c + tb_diag_vec*mod ) ] )
     else:
-        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ), 
-                          np.round( l_c + bt_diag_vec*mod ), 
+        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
+                          np.round( l_c + bt_diag_vec*mod ),
                           np.round( l_c + tb_diag_vec*mod ),
-                          np.round( l_c - bt_diag_vec*mod ), 
+                          np.round( l_c - bt_diag_vec*mod ),
                          ] )
-                          
+
         area = mathlib.polygon_area(l_t[:,0], l_t[:,1] )
         side = np.float32(math.sqrt(area) / 2)
-        l_t = np.array( [ np.round( l_c + [-side,-side] ), 
-                          np.round( l_c + [ side,-side] ), 
-                          np.round( l_c + [ side, side] ) ] )    
-        
+        l_t = np.array( [ np.round( l_c + [-side,-side] ),
+                          np.round( l_c + [ side,-side] ),
+                          np.round( l_c + [ side, side] ) ] )
+
     pts2 = np.float32(( (0,0),(output_size,0),(output_size,output_size) ))
     mat = cv2.getAffineTransform(l_t,pts2)
-    
+
 
     #if remove_align:
     #    bbox = transform_points ( [ (0,0), (0,output_size), (output_size, output_size), (output_size,0) ], mat, True)
@@ -301,24 +301,24 @@ def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0, full_
     return mat
 
 #if full_face_align_top and (face_type == FaceType.FULL or face_type == FaceType.FULL_NO_ALIGN):
-#    #lmrks2 = expand_eyebrows(image_landmarks)    
-#    #lmrks2_ = transform_points( [ lmrks2[19], lmrks2[24] ], mat, False )     
-#    #y_diff = np.float32( (0,np.min(lmrks2_[:,1])) ) 
+#    #lmrks2 = expand_eyebrows(image_landmarks)
+#    #lmrks2_ = transform_points( [ lmrks2[19], lmrks2[24] ], mat, False )
+#    #y_diff = np.float32( (0,np.min(lmrks2_[:,1])) )
 #    #y_diff = transform_points( [ np.float32( (0,0) ), y_diff], mat, True)
 #    #y_diff = y_diff[1]-y_diff[0]
-#    
+#
 #    x_diff = np.float32((0,0))
-#    
-#    lmrks2_ = transform_points( [ image_landmarks[0], image_landmarks[16] ], mat, False )   
+#
+#    lmrks2_ = transform_points( [ image_landmarks[0], image_landmarks[16] ], mat, False )
 #    if lmrks2_[0,0] < 0:
-#        x_diff = lmrks2_[0,0]        
+#        x_diff = lmrks2_[0,0]
 #        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
-#        x_diff = x_diff[1]-x_diff[0]        
+#        x_diff = x_diff[1]-x_diff[0]
 #    elif lmrks2_[1,0] >= output_size:
 #        x_diff = lmrks2_[1,0]-(output_size-1)
 #        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
-#        x_diff = x_diff[1]-x_diff[0]    
-#    
+#        x_diff = x_diff[1]-x_diff[0]
+#
 #    mat = cv2.getAffineTransform( l_t+y_diff+x_diff ,pts2)
 def expand_eyebrows(lmrks, eyebrows_expand_mod=1.0):
     if len(lmrks) != 68:
@@ -372,6 +372,30 @@ def get_image_hull_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, 
         ie_polys.overlay_mask(hull_mask)
 
     return hull_mask
+    
+def get_image_eye_mask (image_shape, image_landmarks):
+    if len(image_landmarks) != 68:
+        raise Exception('get_image_eye_mask works only with 68 landmarks')
+    
+    h,w,c = image_shape
+
+    hull_mask = np.zeros( (h,w,1),dtype=np.float32)
+    
+    image_landmarks = image_landmarks.astype(np.int)
+
+    cv2.fillConvexPoly( hull_mask, cv2.convexHull( image_landmarks[36:42]), (1,) )
+    cv2.fillConvexPoly( hull_mask, cv2.convexHull( image_landmarks[42:48]), (1,) )
+
+    dilate = h // 32
+    hull_mask = cv2.dilate(hull_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(dilate,dilate)), iterations = 1 )
+    
+    blur = h // 16
+    blur = blur + (1-blur % 2)
+    hull_mask = cv2.GaussianBlur(hull_mask, (blur, blur) , 0)
+    hull_mask = hull_mask[...,None]
+
+    return hull_mask
+
 
 def alpha_to_color (img_alpha, color):
     if len(img_alpha.shape) == 2:
@@ -535,17 +559,6 @@ def get_cmask (image_shape, lmrks, eyebrows_expand_mod=1.0):
     #result = np.clip (result, 0, 1)
     return result
 
-def get_image_eye_mask (image_shape, image_landmarks):
-    if len(image_landmarks) != 68:
-        raise Exception('get_image_eye_mask works only with 68 landmarks')
-
-    hull_mask = np.zeros(image_shape[0:2]+(1,),dtype=np.float32)
-
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull( image_landmarks[36:42]), (1,) )
-    cv2.fillConvexPoly( hull_mask, cv2.convexHull( image_landmarks[42:48]), (1,) )
-
-    return hull_mask
-
 def blur_image_hull_mask (hull_mask):
 
     maxregion = np.argwhere(hull_mask==1.0)
@@ -609,7 +622,13 @@ def mirror_landmarks (landmarks, val):
     result[:,0] = val - result[:,0] - 1
     return result
 
-def draw_landmarks (image, image_landmarks, color=(0,255,0), transparent_mask=False, ie_polys=None):
+def get_face_struct_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, ie_polys=None, color=(1,) ):
+    mask = np.zeros(image_shape[0:2]+( len(color),),dtype=np.float32)
+    lmrks = expand_eyebrows(image_landmarks, eyebrows_expand_mod)
+    draw_landmarks (mask, image_landmarks, color=color, draw_circles=False, thickness=2, ie_polys=ie_polys)    
+    return mask
+    
+def draw_landmarks (image, image_landmarks, color=(0,255,0), draw_circles=True, thickness=1, transparent_mask=False, ie_polys=None):
     if len(image_landmarks) != 68:
         raise Exception('get_image_eye_mask works only with 68 landmarks')
 
@@ -625,16 +644,18 @@ def draw_landmarks (image, image_landmarks, color=(0,255,0), transparent_mask=Fa
 
     # open shapes
     cv2.polylines(image, tuple(np.array([v]) for v in ( right_eyebrow, jaw, left_eyebrow, np.concatenate((nose, [nose[-6]])) )),
-                  False, color, lineType=cv2.LINE_AA)
+                  False, color, thickness=thickness, lineType=cv2.LINE_AA)
     # closed shapes
     cv2.polylines(image, tuple(np.array([v]) for v in (right_eye, left_eye, mouth)),
-                  True, color, lineType=cv2.LINE_AA)
-    # the rest of the cicles
-    for x, y in np.concatenate((right_eyebrow, left_eyebrow, mouth, right_eye, left_eye, nose), axis=0):
-        cv2.circle(image, (x, y), 1, color, 1, lineType=cv2.LINE_AA)
-    # jaw big circles
-    for x, y in jaw:
-        cv2.circle(image, (x, y), 2, color, lineType=cv2.LINE_AA)
+                  True, color, thickness=thickness, lineType=cv2.LINE_AA)
+                  
+    if draw_circles:
+        # the rest of the cicles
+        for x, y in np.concatenate((right_eyebrow, left_eyebrow, mouth, right_eye, left_eye, nose), axis=0):
+            cv2.circle(image, (x, y), 1, color, 1, lineType=cv2.LINE_AA)
+        # jaw big circles
+        for x, y in jaw:
+            cv2.circle(image, (x, y), 2, color, lineType=cv2.LINE_AA)
 
     if transparent_mask:
         mask = get_image_hull_mask (image.shape, image_landmarks, ie_polys=ie_polys)
@@ -665,8 +686,10 @@ def calc_face_yaw(landmarks):
     r = ( (landmarks[16][0]-landmarks[27][0]) + (landmarks[15][0]-landmarks[28][0]) + (landmarks[14][0]-landmarks[29][0]) ) / 3.0
     return float(r-l)
 
-#returns pitch,yaw,roll [-1...+1]
 def estimate_pitch_yaw_roll(aligned_256px_landmarks):
+    """
+    returns pitch,yaw,roll [-pi...+pi]
+    """
     shape = (256,256)
     focal_length = shape[1]
     camera_center = (shape[1] / 2, shape[0] / 2)
@@ -682,7 +705,8 @@ def estimate_pitch_yaw_roll(aligned_256px_landmarks):
         np.zeros((4, 1)) )
 
     pitch, yaw, roll = mathlib.rotationMatrixToEulerAngles( cv2.Rodrigues(rotation_vector)[0] )
-    pitch = np.clip ( pitch/1.30, -1.0, 1.0 )
-    yaw = np.clip ( yaw / 1.11, -1.0, 1.0 )
-    roll = np.clip ( roll/3.15, -1.0, 1.0 ) #todo radians
+    pitch = np.clip ( pitch, -math.pi, math.pi )
+    yaw = np.clip ( yaw , -math.pi, math.pi )
+    roll = np.clip ( roll, -math.pi, math.pi )
+
     return -pitch, yaw, roll

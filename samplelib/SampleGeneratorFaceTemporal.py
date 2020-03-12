@@ -1,34 +1,51 @@
+import multiprocessing
+import pickle
+import time
 import traceback
-import numpy as np
+
 import cv2
+import numpy as np
 
-from utils import iter_utils
+from core import mplib
+from core.joblib import SubprocessGenerator, ThisThreadGenerator
+from facelib import LandmarksProcessor
+from samplelib import (SampleGeneratorBase, SampleLoader, SampleProcessor,
+                       SampleType)
 
-from samplelib import SampleType, SampleProcessor, SampleHost, SampleGeneratorBase
 
-'''
-output_sample_types = [
-                        [SampleProcessor.TypeFlags, size, (optional) {} opts ] ,
-                        ...
-                      ]
-'''
 class SampleGeneratorFaceTemporal(SampleGeneratorBase):
-    def __init__ (self, samples_path, debug, batch_size, temporal_image_count, sample_process_options=SampleProcessor.Options(), output_sample_types=[], generators_count=2, **kwargs):
+    def __init__ (self, samples_path, debug, batch_size,
+                        temporal_image_count=3,
+                        sample_process_options=SampleProcessor.Options(),
+                        output_sample_types=[],
+                        generators_count=2,
+                        **kwargs):
         super().__init__(samples_path, debug, batch_size)
 
         self.temporal_image_count = temporal_image_count
         self.sample_process_options = sample_process_options
         self.output_sample_types = output_sample_types
 
-        self.samples = SampleHost.load (SampleType.FACE_TEMPORAL_SORTED, self.samples_path)
-
         if self.debug:
             self.generators_count = 1
-            self.generators = [iter_utils.ThisThreadGenerator ( self.batch_func, 0 )]
         else:
-            self.generators_count = min ( generators_count, len(self.samples) )
-            self.generators = [iter_utils.SubprocessGenerator ( self.batch_func, i ) for i in range(self.generators_count) ]
-            
+            self.generators_count = generators_count
+
+        samples = SampleLoader.load (SampleType.FACE_TEMPORAL_SORTED, self.samples_path)
+        samples_len = len(samples)
+        if samples_len == 0:
+            raise ValueError('No training data provided.')
+
+        mult_max = 1
+        l = samples_len - ( (self.temporal_image_count)*mult_max - (mult_max-1)  )
+        index_host = mplib.IndexHost(l+1)
+
+        pickled_samples = pickle.dumps(samples, 4)
+        if self.debug:
+            self.generators = [ThisThreadGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(),) )]
+        else:
+            self.generators = [SubprocessGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(),), start_now=True ) for i in range(self.generators_count) ]
+
         self.generator_counter = -1
 
     def __iter__(self):
@@ -39,32 +56,19 @@ class SampleGeneratorFaceTemporal(SampleGeneratorBase):
         generator = self.generators[self.generator_counter % len(self.generators) ]
         return next(generator)
 
-    def batch_func(self, generator_id):
-        samples = self.samples
-        samples_len = len(samples)
-        if samples_len == 0:
-            raise ValueError('No training data provided.')
-            
+    def batch_func(self, param):
         mult_max = 1
-        l = samples_len - ( (self.temporal_image_count)*mult_max - (mult_max-1)  )
+        bs = self.batch_size
+        pickled_samples, index_host = param
+        samples = pickle.loads(pickled_samples)
 
-        samples_idxs = [ *range(l+1) ] [generator_id::self.generators_count]
-        
-        if len(samples_idxs) - self.temporal_image_count < 0:
-            raise ValueError('Not enough samples to fit temporal line.')
-            
-        shuffle_idxs = []
-        
         while True:
-
             batches = None
+
+            indexes = index_host.multi_get(bs)
+
             for n_batch in range(self.batch_size):
-
-                if len(shuffle_idxs) == 0:
-                    shuffle_idxs = samples_idxs.copy()
-                    np.random.shuffle (shuffle_idxs)
-
-                idx = shuffle_idxs.pop()
+                idx = indexes[n_batch]
 
                 temporal_samples = []
                 mult = np.random.randint(mult_max)+1
