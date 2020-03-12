@@ -62,7 +62,7 @@ class SAEHDModel(ModelBase):
             resolution = np.clip ( (resolution // 16) * 16, 64, 512)
             self.options['resolution'] = resolution
             self.options['face_type'] = io.input_str ("Face type", default_face_type, ['h','mf','f','wf'], help_message="Half / mid face / full face / whole face. Half face has better resolution, but covers less area of cheeks. Mid face is 30% wider than half face. 'Whole face' covers full area of face include forehead, but requires manual merge in Adobe After Effects.").lower()
-            self.options['archi'] = io.input_str ("AE architecture", default_archi, ['dfhd','liaehd','df','liae'], help_message="'df' keeps faces more natural. 'liae' can fix overly different face shapes. 'hd' is heavyweight version for the best quality.").lower()
+            self.options['archi'] = io.input_str ("AE architecture", default_archi, ['df','liae','dfhd','liaehd','liaech'], help_message="'df' keeps faces more natural.\n'liae' can fix overly different face shapes.\n'hd' are experimental versions.\n'liaech' - new experimental model by @chervoniy. Based on liae, but produces more src-like face.").lower()
 
         default_d_dims             = 48 if self.options['archi'] == 'dfhd' else 64
         default_d_dims             = self.options['d_dims']             = self.load_or_def_option('d_dims', default_d_dims)
@@ -94,8 +94,8 @@ class SAEHDModel(ModelBase):
         if self.is_first_run() or ask_override:
             self.options['models_opt_on_gpu'] = io.input_bool ("Place models and optimizer on GPU", default_models_opt_on_gpu, help_message="When you train on one GPU, by default model and optimizer weights are placed on GPU to accelerate the process. You can place they on CPU to free up extra VRAM, thus set bigger dimensions.")
 
-            self.options['lr_dropout']  = io.input_bool ("Use learning rate dropout", default_lr_dropout, help_message="When the face is trained enough, you can enable this option to get extra sharpness for less amount of iterations.")
-            self.options['random_warp'] = io.input_bool ("Enable random warp of samples", default_random_warp, help_message="Random warp is required to generalize facial expressions of both faces. When the face is trained enough, you can disable it to get extra sharpness for less amount of iterations.")
+            self.options['lr_dropout']  = io.input_bool ("Use learning rate dropout", default_lr_dropout, help_message="When the face is trained enough, you can enable this option to get extra sharpness and reduce subpixel shake for less amount of iterations.")
+            self.options['random_warp'] = io.input_bool ("Enable random warp of samples", default_random_warp, help_message="Random warp is required to generalize facial expressions of both faces. When the face is trained enough, you can disable it to get extra sharpness and reduce subpixel shake for less amount of iterations.")
 
             self.options['gan_power'] = np.clip ( io.input_number ("GAN power", default_gan_power, add_info="0.0 .. 10.0", help_message="Train the network in Generative Adversarial manner. Accelerates the speed of training. Forces the neural network to learn small details of the face. You can enable/disable this option at any time. Typical value is 1.0"), 0.0, 10.0 )
 
@@ -125,228 +125,19 @@ class SAEHDModel(ModelBase):
         nn.initialize(data_format=self.model_data_format)
         tf = nn.tf
 
-        conv_kernel_initializer = nn.initializers.ca()
-
-        class Downscale(nn.ModelBase):
-            def __init__(self, in_ch, out_ch, kernel_size=5, dilations=1, subpixel=True, use_activator=True, *kwargs ):
-                self.in_ch = in_ch
-                self.out_ch = out_ch
-                self.kernel_size = kernel_size
-                self.dilations = dilations
-                self.subpixel = subpixel
-                self.use_activator = use_activator
-                super().__init__(*kwargs)
-
-            def on_build(self, *args, **kwargs ):
-                self.conv1 = nn.Conv2D( self.in_ch,
-                                        self.out_ch // (4 if self.subpixel else 1),
-                                        kernel_size=self.kernel_size,
-                                        strides=1 if self.subpixel else 2,
-                                        padding='SAME', dilations=self.dilations, kernel_initializer=conv_kernel_initializer)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                if self.subpixel:
-                    x = nn.tf_space_to_depth(x, 2)
-                if self.use_activator:
-                    x = tf.nn.leaky_relu(x, 0.1)
-                return x
-
-            def get_out_ch(self):
-                return (self.out_ch // 4) * 4
-
-        class DownscaleBlock(nn.ModelBase):
-            def on_build(self, in_ch, ch, n_downscales, kernel_size, dilations=1, subpixel=True):
-                self.downs = []
-
-                last_ch = in_ch
-                for i in range(n_downscales):
-                    cur_ch = ch*( min(2**i, 8)  )
-                    self.downs.append ( Downscale(last_ch, cur_ch, kernel_size=kernel_size, dilations=dilations, subpixel=subpixel) )
-                    last_ch = self.downs[-1].get_out_ch()
-
-            def forward(self, inp):
-                x = inp
-                for down in self.downs:
-                    x = down(x)
-                return x
-
-        class Upscale(nn.ModelBase):
-            def on_build(self, in_ch, out_ch, kernel_size=3 ):
-                self.conv1 = nn.Conv2D( in_ch, out_ch*4, kernel_size=kernel_size, padding='SAME', kernel_initializer=conv_kernel_initializer)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = tf.nn.leaky_relu(x, 0.1)
-                x = nn.tf_depth_to_space(x, 2)
-                return x
-
-        class ResidualBlock(nn.ModelBase):
-            def on_build(self, ch, kernel_size=3 ):
-                self.conv1 = nn.Conv2D( ch, ch, kernel_size=kernel_size, padding='SAME', kernel_initializer=conv_kernel_initializer)
-                self.conv2 = nn.Conv2D( ch, ch, kernel_size=kernel_size, padding='SAME', kernel_initializer=conv_kernel_initializer)
-
-            def forward(self, inp):
-                x = self.conv1(inp)
-                x = tf.nn.leaky_relu(x, 0.2)
-                x = self.conv2(x)
-                x = tf.nn.leaky_relu(inp + x, 0.2)
-                return x
-
-        class UpdownResidualBlock(nn.ModelBase):
-            def on_build(self, ch, inner_ch, kernel_size=3 ):
-                self.up   = Upscale (ch, inner_ch, kernel_size=kernel_size)
-                self.res  = ResidualBlock (inner_ch, kernel_size=kernel_size)
-                self.down = Downscale (inner_ch, ch, kernel_size=kernel_size, use_activator=False)
-
-            def forward(self, inp):
-                x = self.up(inp)
-                x = upx = self.res(x)
-                x = self.down(x)
-                x = x + inp
-                x = tf.nn.leaky_relu(x, 0.2)
-                return x, upx
-
-        class Encoder(nn.ModelBase):
-            def on_build(self, in_ch, e_ch, is_hd):
-                self.is_hd=is_hd
-                if self.is_hd:
-                    self.down1 = DownscaleBlock(in_ch, e_ch*2, n_downscales=4, kernel_size=3, dilations=1)
-                    self.down2 = DownscaleBlock(in_ch, e_ch*2, n_downscales=4, kernel_size=5, dilations=1)
-                    self.down3 = DownscaleBlock(in_ch, e_ch//2, n_downscales=4, kernel_size=5, dilations=2)
-                    self.down4 = DownscaleBlock(in_ch, e_ch//2, n_downscales=4, kernel_size=7, dilations=2)
-                else:
-                    self.down1 = DownscaleBlock(in_ch, e_ch, n_downscales=4, kernel_size=5, dilations=1, subpixel=False)
-
-            def forward(self, inp):
-                if self.is_hd:
-                    x = tf.concat([ nn.tf_flatten(self.down1(inp)),
-                                    nn.tf_flatten(self.down2(inp)),
-                                    nn.tf_flatten(self.down3(inp)),
-                                    nn.tf_flatten(self.down4(inp)) ], -1 )
-                else:
-                    x = nn.tf_flatten(self.down1(inp))
-                return x
-
-        class Inter(nn.ModelBase):
-            def __init__(self, in_ch, lowest_dense_res, ae_ch, ae_out_ch, **kwargs):
-                self.in_ch, self.lowest_dense_res, self.ae_ch, self.ae_out_ch = in_ch, lowest_dense_res, ae_ch, ae_out_ch
-                super().__init__(**kwargs)
-
-            def on_build(self):
-                in_ch, lowest_dense_res, ae_ch, ae_out_ch = self.in_ch, self.lowest_dense_res, self.ae_ch, self.ae_out_ch
-
-                self.dense1 = nn.Dense( in_ch, ae_ch )
-                self.dense2 = nn.Dense( ae_ch, lowest_dense_res * lowest_dense_res * ae_out_ch )
-                self.upscale1 = Upscale(ae_out_ch, ae_out_ch)
-
-            def forward(self, inp):
-                x = self.dense1(inp)
-                x = self.dense2(x)
-                x = nn.tf_reshape_4D (x, lowest_dense_res, lowest_dense_res, self.ae_out_ch)
-                x = self.upscale1(x)
-                return x
-
-            def get_out_ch(self):
-                return self.ae_out_ch
-
-        class Decoder(nn.ModelBase):
-            def on_build(self, in_ch, d_ch, d_mask_ch, is_hd ):
-                self.is_hd = is_hd
-
-                self.upscale0 = Upscale(in_ch, d_ch*8, kernel_size=3)
-                self.upscale1 = Upscale(d_ch*8, d_ch*4, kernel_size=3)
-                self.upscale2 = Upscale(d_ch*4, d_ch*2, kernel_size=3)
-
-                if is_hd:
-                    self.res0 = UpdownResidualBlock(in_ch, d_ch*8, kernel_size=3)
-                    self.res1 = UpdownResidualBlock(d_ch*8, d_ch*4, kernel_size=3)
-                    self.res2 = UpdownResidualBlock(d_ch*4, d_ch*2, kernel_size=3)
-                    self.res3 = UpdownResidualBlock(d_ch*2, d_ch, kernel_size=3)
-                else:
-                    self.res0 = ResidualBlock(d_ch*8, kernel_size=3)
-                    self.res1 = ResidualBlock(d_ch*4, kernel_size=3)
-                    self.res2 = ResidualBlock(d_ch*2, kernel_size=3)
-
-                self.out_conv  = nn.Conv2D( d_ch*2, 3, kernel_size=1, padding='SAME', kernel_initializer=conv_kernel_initializer)
-
-                self.upscalem0 = Upscale(in_ch, d_mask_ch*8, kernel_size=3)
-                self.upscalem1 = Upscale(d_mask_ch*8, d_mask_ch*4, kernel_size=3)
-                self.upscalem2 = Upscale(d_mask_ch*4, d_mask_ch*2, kernel_size=3)
-                self.out_convm = nn.Conv2D( d_mask_ch*2, 1, kernel_size=1, padding='SAME', kernel_initializer=conv_kernel_initializer)
-
-            def get_weights_ex(self, include_mask):
-                # Call internal get_weights in order to initialize inner logic
-                self.get_weights()
-
-                weights = self.upscale0.get_weights() + self.upscale1.get_weights() + self.upscale2.get_weights() \
-                          + self.res0.get_weights() + self.res1.get_weights() + self.res2.get_weights() + self.out_conv.get_weights()
-                          
-                if self.is_hd:
-                    weights += self.res3.get_weights()
-
-                if include_mask:
-                    weights += self.upscalem0.get_weights() + self.upscalem1.get_weights() + self.upscalem2.get_weights() \
-                               + self.out_convm.get_weights()
-                return weights
-
-
-            def forward(self, inp):
-                z = inp
-
-                if self.is_hd:
-                    x, upx = self.res0(z)
-                    x = self.upscale0(x)
-                    x = tf.nn.leaky_relu(x + upx, 0.2)
-                    x, upx = self.res1(x)
-
-                    x = self.upscale1(x)
-                    x = tf.nn.leaky_relu(x + upx, 0.2)
-                    x, upx = self.res2(x)
-
-                    x = self.upscale2(x)
-                    x = tf.nn.leaky_relu(x + upx, 0.2)
-                    x, upx = self.res3(x)
-                else:
-                    x = self.upscale0(z)
-                    x = self.res0(x)
-                    x = self.upscale1(x)
-                    x = self.res1(x)
-                    x = self.upscale2(x)
-                    x = self.res2(x)
-
-                m = self.upscalem0(z)
-                m = self.upscalem1(m)
-                m = self.upscalem2(m)
-
-                return tf.nn.sigmoid(self.out_conv(x)), \
-                       tf.nn.sigmoid(self.out_convm(m))
-
-        class CodeDiscriminator(nn.ModelBase):
-            def on_build(self, in_ch, code_res, ch=256):
-                n_downscales = 1 + code_res // 8
-
-                self.convs = []
-                prev_ch = in_ch
-                for i in range(n_downscales):
-                    cur_ch = ch * min( (2**i), 8 )
-                    self.convs.append ( nn.Conv2D( prev_ch, cur_ch, kernel_size=4 if i == 0 else 3, strides=2, padding='SAME', kernel_initializer=conv_kernel_initializer) )
-                    prev_ch = cur_ch
-
-                self.out_conv =  nn.Conv2D( prev_ch, 1, kernel_size=1, padding='VALID', kernel_initializer=conv_kernel_initializer)
-
-            def forward(self, x):
-                for conv in self.convs:
-                    x = tf.nn.leaky_relu( conv(x), 0.1 )
-                return self.out_conv(x)
-
         device_config = nn.getCurrentDeviceConfig()
         devices = device_config.devices
 
         self.resolution = resolution = self.options['resolution']
+        self.face_type = {'h'  : FaceType.HALF,
+                          'mf' : FaceType.MID_FULL,
+                          'f'  : FaceType.FULL,
+                          'wf' : FaceType.WHOLE_FACE}[ self.options['face_type'] ]
+
         learn_mask = self.options['learn_mask']
         eyes_prio = self.options['eyes_prio']
         archi = self.options['archi']
+        is_hd = 'hd' in archi
         ae_dims = self.options['ae_dims']
         e_dims = self.options['e_dims']
         d_dims = self.options['d_dims']
@@ -358,6 +149,9 @@ class SAEHDModel(ModelBase):
         self.gan_power = gan_power = self.options['gan_power'] if not self.pretrain else 0.0
 
         masked_training = self.options['masked_training']
+        ct_mode = self.options['ct_mode']
+        if ct_mode == 'none':
+            ct_mode = None
 
         models_opt_on_gpu = False if len(devices) == 0 else self.options['models_opt_on_gpu']
         models_opt_device = '/GPU:0' if models_opt_on_gpu and self.is_training else '/CPU:0'
@@ -367,8 +161,6 @@ class SAEHDModel(ModelBase):
         output_ch = 3
         bgr_shape = nn.get4Dshape(resolution,resolution,input_ch)
         mask_shape = nn.get4Dshape(resolution,resolution,1)
-        lowest_dense_res = resolution // 16
-
         self.model_filename_list = []
 
 
@@ -384,16 +176,22 @@ class SAEHDModel(ModelBase):
             self.target_dstm_all = tf.placeholder (nn.tf_floatx, mask_shape)
             
         # Initializing model classes
+        if archi == 'liaech':
+            lowest_dense_res, Encoder, Inter, Decoder = nn.get_ae_models_chervoniy(resolution)
+        else:
+            lowest_dense_res, Encoder, Inter, Decoder = nn.get_ae_models(resolution)
+  
+        
         with tf.device (models_opt_device):
             if 'df' in archi:
-                self.encoder = Encoder(in_ch=input_ch, e_ch=e_dims, is_hd='hd' in archi, name='encoder')
+                self.encoder = Encoder(in_ch=input_ch, e_ch=e_dims, is_hd=is_hd, name='encoder')
                 encoder_out_ch = self.encoder.compute_output_channels ( (nn.tf_floatx, bgr_shape))
 
-                self.inter = Inter (in_ch=encoder_out_ch, lowest_dense_res=lowest_dense_res, ae_ch=ae_dims, ae_out_ch=ae_dims, name='inter')
+                self.inter = Inter (in_ch=encoder_out_ch, ae_ch=ae_dims, ae_out_ch=ae_dims, is_hd=is_hd, name='inter')
                 inter_out_ch = self.inter.compute_output_channels ( (nn.tf_floatx, (None,encoder_out_ch)))
 
-                self.decoder_src = Decoder(in_ch=inter_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd='hd' in archi, name='decoder_src')
-                self.decoder_dst = Decoder(in_ch=inter_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd='hd' in archi, name='decoder_dst')
+                self.decoder_src = Decoder(in_ch=inter_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd=is_hd, name='decoder_src')
+                self.decoder_dst = Decoder(in_ch=inter_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd=is_hd, name='decoder_dst')
 
                 self.model_filename_list += [ [self.encoder,     'encoder.npy'    ],
                                               [self.inter,       'inter.npy'      ],
@@ -402,20 +200,20 @@ class SAEHDModel(ModelBase):
 
                 if self.is_training:
                     if self.options['true_face_power'] != 0:
-                        self.code_discriminator = CodeDiscriminator(ae_dims, code_res=lowest_dense_res*2, name='dis' )
+                        self.code_discriminator = nn.CodeDiscriminator(ae_dims, code_res=lowest_dense_res*2, name='dis' )
                         self.model_filename_list += [ [self.code_discriminator, 'code_discriminator.npy'] ]
 
             elif 'liae' in archi:
-                self.encoder = Encoder(in_ch=input_ch, e_ch=e_dims, is_hd='hd' in archi, name='encoder')
+                self.encoder = Encoder(in_ch=input_ch, e_ch=e_dims, is_hd=is_hd, name='encoder')
                 encoder_out_ch = self.encoder.compute_output_channels ( (nn.tf_floatx, bgr_shape))
 
-                self.inter_AB = Inter(in_ch=encoder_out_ch, lowest_dense_res=lowest_dense_res, ae_ch=ae_dims, ae_out_ch=ae_dims*2, name='inter_AB')
-                self.inter_B  = Inter(in_ch=encoder_out_ch, lowest_dense_res=lowest_dense_res, ae_ch=ae_dims, ae_out_ch=ae_dims*2, name='inter_B')
+                self.inter_AB = Inter(in_ch=encoder_out_ch, ae_ch=ae_dims, ae_out_ch=ae_dims*2, is_hd=is_hd, name='inter_AB')
+                self.inter_B  = Inter(in_ch=encoder_out_ch, ae_ch=ae_dims, ae_out_ch=ae_dims*2, is_hd=is_hd, name='inter_B')
 
                 inter_AB_out_ch = self.inter_AB.compute_output_channels ( (nn.tf_floatx, (None,encoder_out_ch)))
                 inter_B_out_ch = self.inter_B.compute_output_channels ( (nn.tf_floatx, (None,encoder_out_ch)))
                 inters_out_ch = inter_AB_out_ch+inter_B_out_ch
-                self.decoder = Decoder(in_ch=inters_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd='hd' in archi, name='decoder')
+                self.decoder = Decoder(in_ch=inters_out_ch, d_ch=d_dims, d_mask_ch=d_mask_dims, is_hd=is_hd, name='decoder')
 
                 self.model_filename_list += [ [self.encoder,  'encoder.npy'],
                                               [self.inter_AB, 'inter_AB.npy'],
@@ -431,7 +229,7 @@ class SAEHDModel(ModelBase):
 
                 # Initialize optimizers
                 lr=5e-5
-                lr_dropout = 0.3 if self.options['lr_dropout'] else 1.0
+                lr_dropout = 0.3 if self.options['lr_dropout'] and not self.pretrain else 1.0
                 clipnorm = 1.0 if self.options['clipgrad'] else 0.0
                 self.src_dst_opt = nn.TFRMSpropOptimizer(lr=lr, lr_dropout=lr_dropout, clipnorm=clipnorm, name='src_dst_opt')
                 self.model_filename_list += [ (self.src_dst_opt, 'src_dst_opt.npy') ]
@@ -521,9 +319,9 @@ class SAEHDModel(ModelBase):
                     # unpack masks from one combined mask
                     gpu_target_srcm      = tf.clip_by_value (gpu_target_srcm_all, 0, 1)                                   
                     gpu_target_dstm      = tf.clip_by_value (gpu_target_dstm_all, 0, 1)                    
-                    gpu_target_srcm_eyes = tf.clip_by_value (gpu_target_srcm_all-1, 0, 1)     
+                    gpu_target_srcm_eyes = tf.clip_by_value (gpu_target_srcm_all-1, 0, 1)   
                     gpu_target_dstm_eyes = tf.clip_by_value (gpu_target_dstm_all-1, 0, 1)
-                    
+
                     gpu_target_srcm_blur = nn.tf_gaussian_blur(gpu_target_srcm,  max(1, resolution // 32) )
                     gpu_target_dstm_blur = nn.tf_gaussian_blur(gpu_target_dstm,  max(1, resolution // 32) )
 
@@ -722,43 +520,31 @@ class SAEHDModel(ModelBase):
 
         # initializing sample generators
         if self.is_training:
-            t = SampleProcessor.Types
-            if self.options['face_type'] == 'h':
-                face_type = t.FACE_TYPE_HALF
-            elif self.options['face_type'] == 'mf':
-                face_type = t.FACE_TYPE_MID_FULL
-            elif self.options['face_type'] == 'f':
-                face_type = t.FACE_TYPE_FULL
-            elif self.options['face_type'] == 'wf':
-                face_type = t.FACE_TYPE_WHOLE_FACE
-                
             training_data_src_path = self.training_data_src_path if not self.pretrain else self.get_pretraining_data_path()
             training_data_dst_path = self.training_data_dst_path if not self.pretrain else self.get_pretraining_data_path()
 
-            random_ct_samples_path=training_data_dst_path if self.options['ct_mode'] != 'none' and not self.pretrain else None
-
-            t_img_warped = t.IMG_WARPED_TRANSFORMED if self.options['random_warp'] else t.IMG_TRANSFORMED
+            random_ct_samples_path=training_data_dst_path if ct_mode is not None and not self.pretrain else None
 
             cpu_count = min(multiprocessing.cpu_count(), 8)
             src_generators_count = cpu_count // 2
             dst_generators_count = cpu_count // 2
-            if self.options['ct_mode'] != 'none':
+            if ct_mode is not None:
                 src_generators_count = int(src_generators_count * 1.5)
 
             self.set_training_data_generators ([
                     SampleGeneratorFace(training_data_src_path, random_ct_samples_path=random_ct_samples_path, debug=self.is_debug(), batch_size=self.get_batch_size(),
                         sample_process_options=SampleProcessor.Options(random_flip=self.random_flip),
-                        output_sample_types = [ {'types' : (t_img_warped, face_type, t.MODE_BGR),      'data_format':nn.data_format, 'resolution': resolution, 'ct_mode': self.options['ct_mode'] },
-                                                {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_BGR), 'data_format':nn.data_format, 'resolution': resolution, 'ct_mode': self.options['ct_mode'] },
-                                                {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_FACE_MASK_ALL_EYES_HULL), 'data_format':nn.data_format, 'resolution': resolution },
+                        output_sample_types = [ {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,'warp':self.options['random_warp'], 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR, 'ct_mode': ct_mode,                                           'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
+                                                {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,'warp':False                      , 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR, 'ct_mode': ct_mode,                                           'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
+                                                {'sample_type': SampleProcessor.SampleType.FACE_MASK, 'warp':False                      , 'transform':True, 'channel_type' : SampleProcessor.ChannelType.G,   'face_mask_type' : SampleProcessor.FaceMaskType.ALL_EYES_HULL, 'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
                                               ],
                         generators_count=src_generators_count ),
 
                     SampleGeneratorFace(training_data_dst_path, debug=self.is_debug(), batch_size=self.get_batch_size(),
                         sample_process_options=SampleProcessor.Options(random_flip=self.random_flip),
-                        output_sample_types = [ {'types' : (t_img_warped, face_type, t.MODE_BGR),      'data_format':nn.data_format, 'resolution': resolution},
-                                                {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_BGR), 'data_format':nn.data_format, 'resolution': resolution},
-                                                {'types' : (t.IMG_TRANSFORMED, face_type, t.MODE_FACE_MASK_ALL_EYES_HULL), 'data_format':nn.data_format, 'resolution': resolution},
+                        output_sample_types = [ {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,'warp':self.options['random_warp'], 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR,                                                                'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
+                                                {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,'warp':False                      , 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR,                                                                'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
+                                                {'sample_type': SampleProcessor.SampleType.FACE_MASK, 'warp':False                      , 'transform':True, 'channel_type' : SampleProcessor.ChannelType.G,   'face_mask_type' : SampleProcessor.FaceMaskType.ALL_EYES_HULL, 'face_type':self.face_type, 'data_format':nn.data_format, 'resolution': resolution},
                                               ],
                         generators_count=dst_generators_count )
                              ])
@@ -904,18 +690,7 @@ class SAEHDModel(ModelBase):
 
     #override
     def get_MergerConfig(self):
-        if self.options['face_type'] == 'h':
-            face_type = FaceType.HALF
-        elif self.options['face_type'] == 'mf':
-            face_type = FaceType.MID_FULL
-        elif self.options['face_type'] == 'f':
-            face_type = FaceType.FULL
-        elif self.options['face_type'] == 'wf':
-            face_type = FaceType.WHOLE_FACE
-            
         import merger
-        return self.predictor_func, (self.options['resolution'], self.options['resolution'], 3), merger.MergerConfigMasked(face_type=face_type,
-                                     default_mode = 'overlay' if self.options['ct_mode'] != 'none' or self.options['face_style_power'] or self.options['bg_style_power'] else 'seamless',
-                                    )
+        return self.predictor_func, (self.options['resolution'], self.options['resolution'], 3), merger.MergerConfigMasked(face_type=self.face_type, default_mode = 'overlay')
 
 Model = SAEHDModel
