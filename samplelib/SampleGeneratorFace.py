@@ -27,9 +27,10 @@ class SampleGeneratorFace(SampleGeneratorBase):
                         output_sample_types=[],
                         add_sample_idx=False,
                         generators_count=4,
+                        raise_on_no_data=True,
                         **kwargs):
 
-        super().__init__(samples_path, debug, batch_size)
+        super().__init__(debug, batch_size)
         self.sample_process_options = sample_process_options
         self.output_sample_types = output_sample_types
         self.add_sample_idx = add_sample_idx
@@ -39,11 +40,15 @@ class SampleGeneratorFace(SampleGeneratorBase):
         else:
             self.generators_count = max(1, generators_count)
 
-        samples = SampleLoader.load (SampleType.FACE, self.samples_path)
+        samples = SampleLoader.load (SampleType.FACE, samples_path)
         self.samples_len = len(samples)
 
+        self.initialized = False
         if self.samples_len == 0:
-            raise ValueError('No training data provided.')
+            if raise_on_no_data:
+                raise ValueError('No training data provided.')
+            else:
+                return
 
         index_host = mplib.IndexHost(self.samples_len)
 
@@ -66,7 +71,13 @@ class SampleGeneratorFace(SampleGeneratorBase):
             SubprocessGenerator.start_in_parallel( self.generators )
 
         self.generator_counter = -1
-
+        
+        self.initialized = True
+        
+    #overridable
+    def is_initialized(self):
+        return self.initialized
+        
     def __iter__(self):
         return self
 
