@@ -33,13 +33,15 @@ def trainerThread (s2c, c2s, e,
             save_interval_min = 15
 
             if not training_data_src_path.exists():
-                training_data_src_path.mkdir(exist_ok=True, parents=True)
+                io.log_err('Training data src directory does not exist.')
+                break
 
             if not training_data_dst_path.exists():
-                training_data_dst_path.mkdir(exist_ok=True, parents=True)
+                io.log_err('Training data dst directory does not exist.')
+                break
 
             if not saved_models_path.exists():
-                saved_models_path.mkdir(exist_ok=True, parents=True)
+                saved_models_path.mkdir(exist_ok=True)
 
             model = models.import_model(model_class_name)(
                         is_training=True,
@@ -129,7 +131,8 @@ def trainerThread (s2c, c2s, e,
 
                         if shared_state['after_save']:
                             shared_state['after_save'] = False
-                            
+                            last_save_time = time.time()
+
                             mean_loss = np.mean ( loss_history[save_iter:iter], axis=0)
 
                             for loss_value in mean_loss:
@@ -157,7 +160,6 @@ def trainerThread (s2c, c2s, e,
                             io.log_info ('You can use preview now.')
 
                 if not is_reached_goal and (time.time() - last_save_time) >= save_interval_min*60:
-                    last_save_time += save_interval_min*60
                     model_save()
                     send_preview()
 

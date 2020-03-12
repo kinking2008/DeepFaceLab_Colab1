@@ -53,7 +53,7 @@ class nn():
     tf_concat = None
     tf_gelu = None
     tf_upsample2d = None
-    tf_resize2d_bilinear = None
+    tf_upsample2d_bilinear = None
     tf_flatten = None
     tf_max_pool = None
     tf_reshape_4D = None
@@ -72,9 +72,7 @@ class nn():
     Conv2DTranspose = None
     BlurPool = None
     Dense = None
-    InstanceNorm2D = None
     BatchNorm2D = None
-    AdaIN = None
 
     # Initializers
     initializers = None
@@ -86,11 +84,6 @@ class nn():
     # Models
     PatchDiscriminator = None
     IllumDiscriminator = None
-    CodeDiscriminator = None
-    
-    # Arhis
-    get_ae_models = None
-    get_ae_models_chervonij = None
     
     @staticmethod
     def initialize(device_config=None, floatx="float32", data_format="NHWC"):
@@ -152,15 +145,13 @@ class nn():
             from .initializers import initialize_initializers
             from .optimizers import initialize_optimizers
             from .models import initialize_models
-            from .archis import initialize_archis
-            
+
             initialize_tensor_ops(nn)
             initialize_layers(nn)
             initialize_initializers(nn)
             initialize_optimizers(nn)
             initialize_models(nn)
-            initialize_archis(nn)
-            
+
         if nn.tf_sess is None:
             nn.tf_sess = tf.Session(config=nn.tf_sess_config)
 

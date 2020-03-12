@@ -7,7 +7,7 @@ import types
 import colorama
 import cv2
 from tqdm import tqdm
-from core import stdex
+
 try:
     import IPython #if success we are in colab
     from IPython.display import display, clear_output
@@ -359,11 +359,11 @@ class InteractBase(object):
     def input_process(self, stdin_fd, sq, str):
         sys.stdin = os.fdopen(stdin_fd)
         try:
-            inp = input (str)            
+            inp = input (str)
             sq.put (True)
         except:
-            sq.put (False)        
-    
+            sq.put (False)
+
     def input_in_time (self, str, max_time_sec):
         sq = multiprocessing.Queue()
         p = multiprocessing.Process(target=self.input_process, args=( sys.stdin.fileno(), sq, str))
@@ -377,14 +377,8 @@ class InteractBase(object):
                 break
             if time.time() - t > max_time_sec:
                 break
-            
-            
-        p.terminate()        
-        p.join()
-        
-        old_stdin = sys.stdin
-        sys.stdin = os.fdopen( os.dup(sys.stdin.fileno()) )
-        old_stdin.close()        
+        p.terminate()
+        sys.stdin = os.fdopen( sys.stdin.fileno() )
         return inp
 
     def input_process_skip_pending(self, stdin_fd):

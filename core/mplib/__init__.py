@@ -99,17 +99,15 @@ class IndexHost():
     """
     Provides random shuffled indexes for multiprocesses
     """
-    def __init__(self, indexes_count, rnd_seed=None):
+    def __init__(self, indexes_count):
         self.sq = multiprocessing.Queue()
         self.cqs = []
         self.clis = []
-        self.thread = threading.Thread(target=self.host_thread, args=(indexes_count,rnd_seed) )
+        self.thread = threading.Thread(target=self.host_thread, args=(indexes_count,) )
         self.thread.daemon = True
         self.thread.start()
 
-    def host_thread(self, indexes_count, rnd_seed):        
-        rnd_state = np.random.RandomState(rnd_seed) if rnd_seed is not None else np.random
-        
+    def host_thread(self, indexes_count):
         idxs = [*range(indexes_count)]
         shuffle_idxs = []
         sq = self.sq
@@ -123,7 +121,7 @@ class IndexHost():
                 for i in range(count):
                     if len(shuffle_idxs) == 0:
                         shuffle_idxs = idxs.copy()
-                        rnd_state.shuffle(shuffle_idxs)
+                        np.random.shuffle(shuffle_idxs)
                     result.append(shuffle_idxs.pop())
                 self.cqs[cq_id].put (result)
 

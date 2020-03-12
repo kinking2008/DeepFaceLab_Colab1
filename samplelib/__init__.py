@@ -6,7 +6,5 @@ from .SampleGeneratorBase import SampleGeneratorBase
 from .SampleGeneratorFace import SampleGeneratorFace
 from .SampleGeneratorFacePerson import SampleGeneratorFacePerson
 from .SampleGeneratorFaceTemporal import SampleGeneratorFaceTemporal
-from .SampleGeneratorImage import SampleGeneratorImage
 from .SampleGeneratorImageTemporal import SampleGeneratorImageTemporal
-from .SampleGeneratorFaceCelebAMaskHQ import SampleGeneratorFaceCelebAMaskHQ
 from .PackedFaceset import PackedFaceset

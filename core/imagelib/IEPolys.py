@@ -46,11 +46,9 @@ class IEPolys:
 
     def add(self, type):
         self.list = self.list[0:self.n]
-        l = IEPolysPoints(self, type)
-        self.list.append ( l )
+        self.list.append ( IEPolysPoints(self, type) )
         self.n_max = self.n = self.n + 1
         self.dirty = True
-        return l
 
     def n_dec(self):
         self.n = max(0, self.n-1)
