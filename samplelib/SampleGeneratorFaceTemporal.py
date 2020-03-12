@@ -20,7 +20,7 @@ class SampleGeneratorFaceTemporal(SampleGeneratorBase):
                         output_sample_types=[],
                         generators_count=2,
                         **kwargs):
-        super().__init__(samples_path, debug, batch_size)
+        super().__init__(debug, batch_size)
 
         self.temporal_image_count = temporal_image_count
         self.sample_process_options = sample_process_options
@@ -31,7 +31,7 @@ class SampleGeneratorFaceTemporal(SampleGeneratorBase):
         else:
             self.generators_count = generators_count
 
-        samples = SampleLoader.load (SampleType.FACE_TEMPORAL_SORTED, self.samples_path)
+        samples = SampleLoader.load (SampleType.FACE_TEMPORAL_SORTED, samples_path)
         samples_len = len(samples)
         if samples_len == 0:
             raise ValueError('No training data provided.')
@@ -44,7 +44,7 @@ class SampleGeneratorFaceTemporal(SampleGeneratorBase):
         if self.debug:
             self.generators = [ThisThreadGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(),) )]
         else:
-            self.generators = [SubprocessGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(),), start_now=True ) for i in range(self.generators_count) ]
+            self.generators = [SubprocessGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(),) ) for i in range(self.generators_count) ]
 
         self.generator_counter = -1
 

@@ -64,20 +64,21 @@ def initialize_layers(nn):
                 sub_w_name = "/".join(w_name_split[1:])
 
                 w_val = d.get(sub_w_name, None)
-                w_val = np.reshape( w_val, w.shape.as_list() )
 
                 if w_val is None:
-                    io.log_err(f"Weight {w.name} was not loaded from file {filename}")
+                    #io.log_err(f"Weight {w.name} was not loaded from file {filename}")
                     tuples.append ( (w, w.initializer) )
                 else:
+                    w_val = np.reshape( w_val, w.shape.as_list() )
                     tuples.append ( (w, w_val) )
-
+                    
             nn.tf_batch_set_value(tuples)
 
             return True
 
         def init_weights(self):
             nn.tf_init_weights(self.get_weights())
+            
     nn.Saveable = Saveable
 
     class LayerBase():
@@ -109,7 +110,7 @@ def initialize_layers(nn):
 
     class Conv2D(LayerBase):
         """
-        use_wscale  bool enables equalized learning rate, kernel_initializer will be forced to random_normal
+        use_wscale  bool enables equalized learning rate, if kernel_initializer is None, it will be forced to random_normal
 
 
         """
@@ -171,7 +172,8 @@ def initialize_layers(nn):
                 fan_in = self.kernel_size*self.kernel_size*self.in_ch
                 he_std = gain / np.sqrt(fan_in) # He init
                 self.wscale = tf.constant(he_std, dtype=self.dtype )
-                kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
+                if kernel_initializer is None:
+                    kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
 
             if kernel_initializer is None:
                 kernel_initializer = tf.initializers.glorot_uniform(dtype=self.dtype)
@@ -217,7 +219,7 @@ def initialize_layers(nn):
     class Conv2DTranspose(LayerBase):
         """
         use_wscale      enables weight scale (equalized learning rate)
-                        kernel_initializer will be forced to random_normal
+                        if kernel_initializer is None, it will be forced to random_normal
         """
         def __init__(self, in_ch, out_ch, kernel_size, strides=2, padding='SAME', use_bias=True, use_wscale=False, kernel_initializer=None, bias_initializer=None, trainable=True, dtype=None, **kwargs ):
             if not isinstance(strides, int):
@@ -247,7 +249,9 @@ def initialize_layers(nn):
                 fan_in = self.kernel_size*self.kernel_size*self.in_ch
                 he_std = gain / np.sqrt(fan_in) # He init
                 self.wscale = tf.constant(he_std, dtype=self.dtype )
-                kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
+                if kernel_initializer is None:
+                    kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
+                    
             if kernel_initializer is None:
                 kernel_initializer = tf.initializers.glorot_uniform(dtype=self.dtype)
             self.weight = tf.get_variable("weight", (self.kernel_size,self.kernel_size,self.out_ch,self.in_ch), dtype=self.dtype, initializer=kernel_initializer, trainable=self.trainable )
@@ -315,10 +319,15 @@ def initialize_layers(nn):
                 dim_size = dim_size * stride_size
             return dim_size
     nn.Conv2DTranspose = Conv2DTranspose
-
+    
     class BlurPool(LayerBase):
         def __init__(self, filt_size=3, stride=2, **kwargs ):
-            self.strides = [1,stride,stride,1]
+
+            if nn.data_format == "NHWC":
+                self.strides = [1,stride,stride,1]
+            else:
+                self.strides = [1,1,stride,stride]
+
             self.filt_size = filt_size
             pad = [ int(1.*(filt_size-1)/2), int(np.ceil(1.*(filt_size-1)/2)) ]
 
@@ -352,9 +361,9 @@ def initialize_layers(nn):
             self.k = tf.constant (self.a, dtype=nn.tf_floatx )
 
         def __call__(self, x):
-            k = tf.tile (self.k, (1,1,x.shape[-1],1) )
+            k = tf.tile (self.k, (1,1,x.shape[nn.conv2d_ch_axis],1) )
             x = tf.pad(x, self.padding )
-            x = tf.nn.depthwise_conv2d(x, k, self.strides, 'VALID')
+            x = tf.nn.depthwise_conv2d(x, k, self.strides, 'VALID', data_format=nn.data_format)
             return x
     nn.BlurPool = BlurPool
 
@@ -362,7 +371,7 @@ def initialize_layers(nn):
         def __init__(self, in_ch, out_ch, use_bias=True, use_wscale=False, maxout_ch=0, kernel_initializer=None, bias_initializer=None, trainable=True, dtype=None, **kwargs ):
             """
             use_wscale          enables weight scale (equalized learning rate)
-                                kernel_initializer will be forced to random_normal
+                                if kernel_initializer is None, it will be forced to random_normal
 
             maxout_ch     https://link.springer.com/article/10.1186/s40537-019-0233-0
                                 typical 2-4 if you want to enable DenseMaxout behaviour
@@ -394,7 +403,8 @@ def initialize_layers(nn):
                 fan_in = np.prod( weight_shape[:-1] )
                 he_std = gain / np.sqrt(fan_in) # He init
                 self.wscale = tf.constant(he_std, dtype=self.dtype )
-                kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
+                if kernel_initializer is None:
+                    kernel_initializer = tf.initializers.random_normal(0, 1.0, dtype=self.dtype)
 
             if kernel_initializer is None:
                 kernel_initializer = tf.initializers.glorot_uniform(dtype=self.dtype)
@@ -430,6 +440,44 @@ def initialize_layers(nn):
             return x
     nn.Dense = Dense
 
+    class InstanceNorm2D(LayerBase):
+        def __init__(self, in_ch, dtype=None, **kwargs):
+            self.in_ch = in_ch
+            
+            if dtype is None:
+                dtype = nn.tf_floatx
+            self.dtype = dtype
+            
+            super().__init__(**kwargs)
+
+        def build_weights(self):
+            kernel_initializer = tf.initializers.glorot_uniform(dtype=self.dtype)            
+            self.weight       = tf.get_variable("weight",   (self.in_ch,), dtype=self.dtype, initializer=kernel_initializer )
+            self.bias         = tf.get_variable("bias",     (self.in_ch,), dtype=self.dtype, initializer=tf.initializers.zeros() )
+
+        def get_weights(self):
+            return [self.weight, self.bias]
+
+        def __call__(self, x):
+            if nn.data_format == "NHWC":
+                shape = (1,1,1,self.in_ch)
+            else:
+                shape = (1,self.in_ch,1,1)
+
+            weight       = tf.reshape ( self.weight      , shape )
+            bias         = tf.reshape ( self.bias        , shape )
+            
+            x_mean = tf.reduce_mean(x, axis=nn.conv2d_spatial_axes, keepdims=True )
+            x_std  = tf.math.reduce_std(x, axis=nn.conv2d_spatial_axes, keepdims=True ) + 1e-5
+            
+            x = (x - x_mean) / x_std
+            x *= weight
+            x += bias
+            
+            return x
+
+    nn.InstanceNorm2D = InstanceNorm2D
+    
     class BatchNorm2D(LayerBase):
         """
         currently not for training
@@ -469,3 +517,57 @@ def initialize_layers(nn):
             return x
 
     nn.BatchNorm2D = BatchNorm2D
+    
+    class AdaIN(LayerBase):
+        """
+        """
+        def __init__(self, in_ch, mlp_ch, kernel_initializer=None, dtype=None, **kwargs):
+            self.in_ch = in_ch
+            self.mlp_ch = mlp_ch
+            self.kernel_initializer = kernel_initializer
+            
+            if dtype is None:
+                dtype = nn.tf_floatx
+            self.dtype = dtype
+            
+            super().__init__(**kwargs)
+
+        def build_weights(self):
+            kernel_initializer = self.kernel_initializer
+            if kernel_initializer is None:
+                kernel_initializer = tf.initializers.he_normal()#(dtype=self.dtype)
+
+            self.weight1   = tf.get_variable("weight1", (self.mlp_ch, self.in_ch), dtype=self.dtype, initializer=kernel_initializer)
+            self.bias1     = tf.get_variable("bias1",   (self.in_ch,), dtype=self.dtype, initializer=tf.initializers.zeros())
+            self.weight2   = tf.get_variable("weight2", (self.mlp_ch, self.in_ch), dtype=self.dtype, initializer=kernel_initializer)
+            self.bias2     = tf.get_variable("bias2",   (self.in_ch,), dtype=self.dtype, initializer=tf.initializers.zeros())
+
+        def get_weights(self):
+            return [self.weight1, self.bias1, self.weight2, self.bias2]
+
+        def __call__(self, inputs):
+            x, mlp = inputs
+            
+            gamma = tf.matmul(mlp, self.weight1)
+            gamma = tf.add(gamma, tf.reshape(self.bias1, (1,self.in_ch) ) )
+                
+            beta = tf.matmul(mlp, self.weight2)
+            beta = tf.add(beta, tf.reshape(self.bias2, (1,self.in_ch) ) )
+                
+            
+            if nn.data_format == "NHWC":
+                shape = (-1,1,1,self.in_ch)
+            else:
+                shape = (-1,self.in_ch,1,1)
+                
+            x_mean = tf.reduce_mean(x, axis=nn.conv2d_spatial_axes, keepdims=True )
+            x_std  = tf.math.reduce_std(x, axis=nn.conv2d_spatial_axes, keepdims=True ) + 1e-5
+            
+            x = (x - x_mean) / x_std
+            x *= tf.reshape(gamma, shape)
+
+            x += tf.reshape(beta, shape)
+
+            return x
+
+    nn.AdaIN = AdaIN

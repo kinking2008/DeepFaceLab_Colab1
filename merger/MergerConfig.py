@@ -107,8 +107,6 @@ class MergerConfigMasked(MergerConfig):
 
     def __init__(self, face_type=FaceType.FULL,
                        default_mode = 'overlay',
-                       clip_hborder_mask_per = 0,
-
                        mode='overlay',
                        masked_hist_match=True,
                        hist_match_threshold = 238,
@@ -128,11 +126,10 @@ class MergerConfigMasked(MergerConfig):
         super().__init__(type=MergerConfig.TYPE_MASKED, **kwargs)
 
         self.face_type = face_type
-        if self.face_type not in [FaceType.HALF, FaceType.MID_FULL, FaceType.FULL ]:
+        if self.face_type not in [FaceType.HALF, FaceType.MID_FULL, FaceType.FULL, FaceType.WHOLE_FACE ]:
             raise ValueError("MergerConfigMasked does not support this type of face.")
 
         self.default_mode = default_mode
-        self.clip_hborder_mask_per = clip_hborder_mask_per
 
         #default changeable params
         if mode not in mode_str_dict:
@@ -242,7 +239,7 @@ class MergerConfigMasked(MergerConfig):
             self.color_transfer_mode = ctm_str_dict[self.color_transfer_mode]
 
         super().ask_settings()
- 
+
         self.super_resolution_power = np.clip ( io.input_int ("Choose super resolution power", 0, add_info="0..100", help_message="Enhance details by applying superresolution network."), 0, 100)
 
         if 'raw' not in self.mode:
@@ -298,11 +295,11 @@ class MergerConfigMasked(MergerConfig):
         r += f"""output_face_scale: {self.output_face_scale}\n"""
 
         if 'raw' not in self.mode:
-            r += f"""color_transfer_mode: { ctm_dict[self.color_transfer_mode]}\n"""
+            r += f"""color_transfer_mode: {ctm_dict[self.color_transfer_mode]}\n"""
 
         r += super().to_string(filename)
         r += f"""super_resolution_power: {self.super_resolution_power}\n"""
-        
+
         if 'raw' not in self.mode:
             r += (f"""image_denoise_power: {self.image_denoise_power}\n"""
                   f"""bicubic_degrade_power: {self.bicubic_degrade_power}\n"""

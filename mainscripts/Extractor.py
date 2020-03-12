@@ -241,14 +241,14 @@ class ExtractSubprocessor(Subprocessor):
 
                         landmarks_bbox = LandmarksProcessor.transform_points ( [ (0,0), (0,image_size-1), (image_size-1, image_size-1), (image_size-1,0) ], image_to_face_mat, True)
 
-                        rect_area      = mathlib.polygon_area(np.array(rect[[0,2,2,0]]), np.array(rect[[1,1,3,3]]))
-                        landmarks_area = mathlib.polygon_area(landmarks_bbox[:,0], landmarks_bbox[:,1] )
+                        rect_area      = mathlib.polygon_area(np.array(rect[[0,2,2,0]]).astype(np.float32), np.array(rect[[1,1,3,3]]).astype(np.float32))
+                        landmarks_area = mathlib.polygon_area(landmarks_bbox[:,0].astype(np.float32), landmarks_bbox[:,1].astype(np.float32) )
 
                         if not data.manual and face_type <= FaceType.FULL_NO_ALIGN and landmarks_area > 4*rect_area: #get rid of faces which umeyama-landmark-area > 4*detector-rect-area
                             continue
 
                         if output_debug_path is not None:
-                            LandmarksProcessor.draw_rect_landmarks (debug_image, rect, image_landmarks, image_size, face_type, transparent_mask=True)
+                            LandmarksProcessor.draw_rect_landmarks (debug_image, rect, image_landmarks, face_type, image_size, transparent_mask=True)
 
                     output_path = final_output_path
                     if data.force_output_path is not None:
@@ -261,7 +261,7 @@ class ExtractSubprocessor(Subprocessor):
                             shutil.copy ( str(filepath), str(output_filepath) )
                     else:
                         output_filepath = output_path / f"{filepath.stem}_{face_idx}.jpg"
-                        cv2_imwrite(output_filepath, face_image, [int(cv2.IMWRITE_JPEG_QUALITY), 100] )
+                        cv2_imwrite(output_filepath, face_image, [int(cv2.IMWRITE_JPEG_QUALITY), 90] )
 
                     DFLJPG.embed_data(output_filepath, face_type=FaceType.toString(face_type),
                                                     landmarks=face_image_landmarks.tolist(),
@@ -601,7 +601,7 @@ class ExtractSubprocessor(Subprocessor):
                 view_landmarks = LandmarksProcessor.transform_points (view_landmarks, mat)
 
             landmarks_color = (255,255,0) if self.rect_locked else (0,255,0)
-            LandmarksProcessor.draw_rect_landmarks (image, view_rect, view_landmarks, self.image_size, self.face_type, landmarks_color=landmarks_color)
+            LandmarksProcessor.draw_rect_landmarks (image, view_rect, view_landmarks, self.face_type, self.image_size, landmarks_color=landmarks_color)
             self.extract_needed = False
 
             io.show_image (self.wnd_name, image)
@@ -680,7 +680,6 @@ def main(detector=None,
          manual_fix=False,
          manual_output_debug_fix=False,
          manual_window_size=1368,
-         image_size=256,
          face_type='full_face',
          max_faces_from_image=0,
          cpu_only = False,
@@ -688,6 +687,8 @@ def main(detector=None,
          ):
     face_type = FaceType.fromString(face_type)
 
+    image_size = 512
+    
     if not input_path.exists():
         io.log_err ('Input directory not found. Please ensure it exists.')
         return
@@ -710,7 +711,7 @@ def main(detector=None,
         if not manual_output_debug_fix and input_path != output_path:
             output_images_paths = pathex.get_image_paths(output_path)
             if len(output_images_paths) > 0:
-                io.input(f"WARNING !!! \n {output_path} contains files! \n They will be deleted. \n Press enter to continue.")
+                io.input(f"\n WARNING !!! \n {output_path} contains files! \n They will be deleted. \n Press enter to continue.\n")
                 for filename in output_images_paths:
                     Path(filename).unlink()
     else:

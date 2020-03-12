@@ -47,7 +47,7 @@ if __name__ == "__main__":
     p.add_argument('--output-dir', required=True, action=fixPathAction, dest="output_dir", help="Output directory. This is where the extracted files will be stored.")
     p.add_argument('--output-debug', action="store_true", dest="output_debug", default=None, help="Writes debug images to <output-dir>_debug\ directory.")
     p.add_argument('--no-output-debug', action="store_false", dest="output_debug", default=None, help="Don't writes debug images to <output-dir>_debug\ directory.")
-    p.add_argument('--face-type', dest="face_type", choices=['half_face', 'full_face', 'head', 'full_face_no_align', 'mark_only'], default='full_face', help="Default 'full_face'. Don't change this option, currently all models uses 'full_face'")
+    p.add_argument('--face-type', dest="face_type", choices=['half_face', 'full_face', 'whole_face', 'head', 'full_face_no_align', 'mark_only'], default='full_face', help="Default 'full_face'. Don't change this option, currently all models uses 'full_face'")
     p.add_argument('--manual-fix', action="store_true", dest="manual_fix", default=False, help="Enables manual extract only frames where faces were not recognized.")
     p.add_argument('--manual-output-debug-fix', action="store_true", dest="manual_output_debug_fix", default=False, help="Performs manual reextract input-dir frames which were deleted from [output_dir]_debug\ dir.")
     p.add_argument('--manual-window-size', type=int, dest="manual_window_size", default=1368, help="Manual fix window size. Default: 1368.")
@@ -104,6 +104,17 @@ if __name__ == "__main__":
     p = subparsers.add_parser( "dev_test", help="")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir")
     p.set_defaults (func=process_dev_test)
+    
+    def process_dev_segmented_extract(arguments):
+        osex.set_process_lowest_prio()
+        from mainscripts import dev_misc
+        dev_misc.dev_segmented_extract(arguments.input_dir, arguments.output_dir)
+
+    p = subparsers.add_parser( "dev_segmented_extract", help="")
+    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir")
+    p.add_argument('--output-dir', required=True, action=fixPathAction, dest="output_dir")
+
+    p.set_defaults (func=process_dev_segmented_extract)
 
     def process_sort(arguments):
         osex.set_process_lowest_prio()
@@ -112,7 +123,7 @@ if __name__ == "__main__":
 
     p = subparsers.add_parser( "sort", help="Sort faces in a directory.")
     p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory. A directory containing the files you wish to process.")
-    p.add_argument('--by', dest="sort_by_method", default=None, choices=("blur", "face-yaw", "face-pitch", "hist", "hist-dissim", "brightness", "hue", "black", "origname", "oneface", "final", "absdiff"), help="Method of sorting. 'origname' sort by original filename to recover original sequence." )
+    p.add_argument('--by', dest="sort_by_method", default=None, choices=("blur", "face-yaw", "face-pitch", "face-source-rect-size", "hist", "hist-dissim", "brightness", "hue", "black", "origname", "oneface", "final", "final-faster", "absdiff"), help="Method of sorting. 'origname' sort by original filename to recover original sequence." )
     p.set_defaults (func=process_sort)
 
     def process_util(arguments):
@@ -176,7 +187,7 @@ if __name__ == "__main__":
                   'pretrained_model_path'    : Path(arguments.pretrained_model_dir) if arguments.pretrained_model_dir is not None else None,
                   'no_preview'               : arguments.no_preview,
                   'force_model_name'         : arguments.force_model_name,
-                  'force_gpu_idxs'           : arguments.force_gpu_idxs,
+                  'force_gpu_idxs'           : [ int(x) for x in arguments.force_gpu_idxs.split(',') ] if arguments.force_gpu_idxs is not None else None,
                   'cpu_only'                 : arguments.cpu_only,
                   'execute_programs'         : [ [int(x[0]), x[1] ] for x in arguments.execute_program ],
                   'debug'                    : arguments.debug,
@@ -258,10 +269,9 @@ if __name__ == "__main__":
     def process_videoed_denoise_image_sequence(arguments):
         osex.set_process_lowest_prio()
         from mainscripts import VideoEd
-        VideoEd.denoise_image_sequence (arguments.input_dir, arguments.ext, arguments.factor)
-    p = videoed_parser.add_parser( "denoise-image-sequence", help="Denoise sequence of images, keeping sharp edges. This allows you to make the final fake more believable, since the neural network is not able to make a detailed skin texture, but it makes the edges quite clear. Therefore, if the whole frame is more `blurred`, then a fake will seem more believable. Especially true for scenes of the film, which are usually very clear.")
-    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input file to be processed. Specify .*-extension to find first file.")
-    p.add_argument('--ext', dest="ext", default=None, help="Image format (extension) of input files.")
+        VideoEd.denoise_image_sequence (arguments.input_dir, arguments.factor)
+    p = videoed_parser.add_parser( "denoise-image-sequence", help="Denoise sequence of images, keeping sharp edges. Helps to remove pixel shake from the predicted face.")
+    p.add_argument('--input-dir', required=True, action=fixPathAction, dest="input_dir", help="Input directory to be processed.")
     p.add_argument('--factor', type=int, dest="factor", default=None, help="Denoise factor (1-20).")
     p.set_defaults(func=process_videoed_denoise_image_sequence)
 

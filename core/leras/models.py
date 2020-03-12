@@ -1,4 +1,6 @@
 import types
+import numpy as np
+from core.interact import interact as io
 
 def initialize_models(nn):
     tf = nn.tf
@@ -7,6 +9,7 @@ def initialize_models(nn):
         def __init__(self, *args, name=None, **kwargs):
             super().__init__(name=name)
             self.layers = []
+            self.layers_by_name = {}
             self.built = False
             self.args = args
             self.kwargs = kwargs
@@ -29,7 +32,8 @@ def initialize_models(nn):
                     layer.build()
 
                 self.layers.append (layer)
-
+                self.layers_by_name[layer.name] = layer
+                
         def xor_list(self, lst1, lst2):
             return  [value for value in lst1+lst2 if (value not in lst1) or (value not in lst2)  ]
 
@@ -74,6 +78,9 @@ def initialize_models(nn):
                 weights += layer.get_weights()
             return weights
 
+        def get_layer_by_name(self, name):
+            return self.layers_by_name.get(name, None)
+            
         def get_layers(self):
             if not self.built:
                 self.build()
@@ -243,15 +250,21 @@ def initialize_models(nn):
     nn.ModelBase = ModelBase
 
     class PatchDiscriminator(nn.ModelBase):
-        def on_build(self, patch_size, in_ch, base_ch=256, kernel_initializer=None):
+        def on_build(self, patch_size, in_ch, base_ch=None, conv_kernel_initializer=None):            
+            suggested_base_ch, kernels_strides = patch_discriminator_kernels[patch_size]
+            
+            if base_ch is None:
+                base_ch = suggested_base_ch
+            
             prev_ch = in_ch
             self.convs = []
-            for i, (kernel_size, strides) in enumerate(patch_discriminator_kernels[patch_size]):
+            for i, (kernel_size, strides) in enumerate(kernels_strides):                
                 cur_ch = base_ch * min( (2**i), 8 )
-                self.convs.append ( nn.Conv2D( prev_ch, cur_ch, kernel_size=kernel_size, strides=strides, padding='SAME', kernel_initializer=kernel_initializer) )
+                
+                self.convs.append ( nn.Conv2D( prev_ch, cur_ch, kernel_size=kernel_size, strides=strides, padding='SAME', kernel_initializer=conv_kernel_initializer) )
                 prev_ch = cur_ch
 
-            self.out_conv =  nn.Conv2D( prev_ch, 1, kernel_size=1, padding='VALID', kernel_initializer=kernel_initializer)
+            self.out_conv =  nn.Conv2D( prev_ch, 1, kernel_size=1, padding='VALID', kernel_initializer=conv_kernel_initializer)
 
         def forward(self, x):
             for conv in self.convs:
@@ -260,21 +273,95 @@ def initialize_models(nn):
 
     nn.PatchDiscriminator = PatchDiscriminator
 
+    class IllumDiscriminator(nn.ModelBase):
+        def on_build(self, patch_size, in_ch, base_ch=None, conv_kernel_initializer=None):
+            suggested_base_ch, kernels_strides = patch_discriminator_kernels[patch_size]            
+            if base_ch is None:
+                base_ch = suggested_base_ch
+            
+            prev_ch = in_ch
+            self.convs = []
+            for i, (kernel_size, strides) in enumerate(kernels_strides):
+                cur_ch = base_ch * min( (2**i), 8 )
+                self.convs.append ( nn.Conv2D( prev_ch, cur_ch, kernel_size=kernel_size, strides=strides, padding='SAME', kernel_initializer=conv_kernel_initializer) )
+                prev_ch = cur_ch
+                
+            self.out1 = nn.Conv2D( 1, 1024, kernel_size=1, strides=1, padding='SAME', kernel_initializer=conv_kernel_initializer)
+            self.out2 = nn.Conv2D( 1024, 1, kernel_size=1, strides=1, padding='SAME', kernel_initializer=conv_kernel_initializer)
 
+        def forward(self, x):
+            for conv in self.convs:
+                x = tf.nn.leaky_relu( conv(x), 0.1 )   
+            
+            x = tf.reduce_mean(x, axis=nn.conv2d_ch_axis, keep_dims=True)
+            
+            x = self.out1(x)
+            x = tf.nn.leaky_relu(x, 0.1 )   
+            x = self.out2(x)
+                   
+            return x
+
+    nn.IllumDiscriminator = IllumDiscriminator
+    
+    class CodeDiscriminator(nn.ModelBase):
+        def on_build(self, in_ch, code_res, ch=256, conv_kernel_initializer=None):
+            if conv_kernel_initializer is None:
+                conv_kernel_initializer = nn.initializers.ca()
+                
+            n_downscales = 1 + code_res // 8
+
+            self.convs = []
+            prev_ch = in_ch
+            for i in range(n_downscales):
+                cur_ch = ch * min( (2**i), 8 )
+                self.convs.append ( nn.Conv2D( prev_ch, cur_ch, kernel_size=4 if i == 0 else 3, strides=2, padding='SAME', kernel_initializer=conv_kernel_initializer) )
+                prev_ch = cur_ch
+
+            self.out_conv =  nn.Conv2D( prev_ch, 1, kernel_size=1, padding='VALID', kernel_initializer=conv_kernel_initializer)
+
+        def forward(self, x):
+            for conv in self.convs:
+                x = tf.nn.leaky_relu( conv(x), 0.1 )
+            return self.out_conv(x)
+    nn.CodeDiscriminator = CodeDiscriminator
+            
 patch_discriminator_kernels = \
-    { 1 : [ [1,1] ],
-      2 : [ [2,1] ],
-      3 : [ [2,1], [2,1] ],
-      4 : [ [2,2], [2,2] ],
-      5 : [ [3,2], [2,2] ],
-      6 : [ [4,2], [2,2] ],
-      7 : [ [3,2], [3,2] ],
-      8 : [ [4,2], [3,2] ],
-      9 : [ [3,2], [4,2] ],
-      10 : [ [4,2], [4,2] ],
-      11 : [ [3,2], [3,2], [2,1] ],
-      12 : [ [4,2], [3,2], [2,1] ],
-      13 : [ [3,2], [4,2], [2,1] ],
-      14 : [ [4,2], [4,2], [2,1] ],
-      15 : [ [3,2], [3,2], [3,1] ],
-      16 : [ [4,2], [3,2], [3,1] ] }
+    { 1  : (512, [ [1,1] ]),
+      2  : (512, [ [2,1] ]),
+      3  : (512, [ [2,1], [2,1] ]),
+      4  : (512, [ [2,2], [2,2] ]),
+      5  : (512, [ [3,2], [2,2] ]),
+      6  : (512, [ [4,2], [2,2] ]),
+      7  : (512, [ [3,2], [3,2] ]),
+      8  : (512, [ [4,2], [3,2] ]),
+      9  : (512, [ [3,2], [4,2] ]),
+      10 : (512, [ [4,2], [4,2] ]),      
+      11 : (512, [ [3,2], [3,2], [2,1] ]),
+      12 : (512, [ [4,2], [3,2], [2,1] ]),
+      13 : (512, [ [3,2], [4,2], [2,1] ]),
+      14 : (512, [ [4,2], [4,2], [2,1] ]),
+      15 : (512, [ [3,2], [3,2], [3,1] ]),
+      16 : (512, [ [4,2], [3,2], [3,1] ]),
+      17 : (512, [ [3,2], [4,2], [3,1] ]),
+      18 : (512, [ [4,2], [4,2], [3,1] ]),      
+      19 : (512, [ [3,2], [3,2], [4,1] ]),
+      20 : (512, [ [4,2], [3,2], [4,1] ]),
+      21 : (512, [ [3,2], [4,2], [4,1] ]),
+      22 : (512, [ [4,2], [4,2], [4,1] ]),      
+      23 : (256, [ [3,2], [3,2], [3,2], [2,1] ]),
+      24 : (256, [ [4,2], [3,2], [3,2], [2,1] ]),
+      25 : (256, [ [3,2], [4,2], [3,2], [2,1] ]),
+      26 : (256, [ [4,2], [4,2], [3,2], [2,1] ]),      
+      27 : (256, [ [3,2], [4,2], [4,2], [2,1] ]),      
+      28 : (256, [ [4,2], [3,2], [4,2], [2,1] ]),
+      29 : (256, [ [3,2], [4,2], [4,2], [2,1] ]),
+      30 : (256, [ [4,2], [4,2], [4,2], [2,1] ]),      
+      31 : (256, [ [3,2], [3,2], [3,2], [3,1] ]),
+      32 : (256, [ [4,2], [3,2], [3,2], [3,1] ]),
+      33 : (256, [ [3,2], [4,2], [3,2], [3,1] ]),
+      34 : (256, [ [4,2], [4,2], [3,2], [3,1] ]),      
+      35 : (256, [ [3,2], [4,2], [4,2], [3,1] ]),      
+      36 : (256, [ [4,2], [3,2], [4,2], [3,1] ]),
+      37 : (256, [ [3,2], [4,2], [4,2], [3,1] ]),
+      38 : (256, [ [4,2], [4,2], [4,2], [3,1] ]),
+    }

@@ -2,14 +2,8 @@ import numpy as np
 import cv2
 from core import randomex
 
-def gen_warp_params (source, flip, rotation_range=[-10,10], scale_range=[-0.5, 0.5], tx_range=[-0.05, 0.05], ty_range=[-0.05, 0.05], rnd_seed=None  ):
-    h,w,c = source.shape
-    if (h != w):
-        raise ValueError ('gen_warp_params accepts only square images.')
-
-    if rnd_seed != None:
-        rnd_state = np.random.RandomState (rnd_seed)
-    else:
+def gen_warp_params (w, flip, rotation_range=[-10,10], scale_range=[-0.5, 0.5], tx_range=[-0.05, 0.05], ty_range=[-0.05, 0.05], rnd_state=None  ):
+    if rnd_state is None:
         rnd_state = np.random
 
     rotation = rnd_state.uniform( rotation_range[0], rotation_range[1] )
@@ -47,11 +41,11 @@ def gen_warp_params (source, flip, rotation_range=[-10,10], scale_range=[-0.5, 0
 
     return params
 
-def warp_by_params (params, img, can_warp, can_transform, can_flip, border_replicate):
+def warp_by_params (params, img, can_warp, can_transform, can_flip, border_replicate, cv2_inter=cv2.INTER_CUBIC):
     if can_warp:
-        img = cv2.remap(img, params['mapx'], params['mapy'], cv2.INTER_CUBIC )
+        img = cv2.remap(img, params['mapx'], params['mapy'], cv2_inter )
     if can_transform:
-        img = cv2.warpAffine( img, params['rmat'], (params['w'], params['w']), borderMode=(cv2.BORDER_REPLICATE if border_replicate else cv2.BORDER_CONSTANT), flags=cv2.INTER_CUBIC )
+        img = cv2.warpAffine( img, params['rmat'], (params['w'], params['w']), borderMode=(cv2.BORDER_REPLICATE if border_replicate else cv2.BORDER_CONSTANT), flags=cv2_inter )
     if len(img.shape) == 2:
         img = img[...,None]
     if can_flip and params['flip']:

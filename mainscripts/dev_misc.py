@@ -1,3 +1,4 @@
+import json
 import multiprocessing
 import shutil
 from pathlib import Path
@@ -5,12 +6,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from DFLIMG import *
-from facelib import FaceType, LandmarksProcessor
+from core import imagelib, pathex
+from core.cv2ex import *
+from core.imagelib import IEPolys
 from core.interact import interact as io
 from core.joblib import Subprocessor
-from core import pathex
-from core.cv2ex import *
+from core.leras import nn
+from DFLIMG import *
+from facelib import FaceType, LandmarksProcessor
 
 from . import Extractor, Sorter
 from .Extractor import ExtractSubprocessor
@@ -393,8 +396,73 @@ def extract_fanseg(input_dir, device_args={} ):
         data = ExtractSubprocessor ([ ExtractSubprocessor.Data(filename) for filename in paths_to_extract ], 'fanseg', multi_gpu=multi_gpu, cpu_only=cpu_only).run()
 
 #unused in end user workflow
+def dev_test_68(input_dir ):
+    # process 68 landmarks dataset with .pts files
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        raise ValueError('input_dir not found. Please ensure it exists.')
+
+    output_path = input_path.parent / (input_path.name+'_aligned')
+
+    io.log_info(f'Output dir is % {output_path}')
+
+    if output_path.exists():
+        output_images_paths = pathex.get_image_paths(output_path)
+        if len(output_images_paths) > 0:
+            io.input_bool("WARNING !!! \n %s contains files! \n They will be deleted. \n Press enter to continue." % (str(output_path)), False )
+            for filename in output_images_paths:
+                Path(filename).unlink()
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
+
+    images_paths = pathex.get_image_paths(input_path)
+
+    for filepath in io.progress_bar_generator(images_paths, "Processing"):
+        filepath = Path(filepath)
+
+
+        pts_filepath = filepath.parent / (filepath.stem+'.pts')
+        if pts_filepath.exists():
+            pts = pts_filepath.read_text()
+            pts_lines = pts.split('\n')
+
+            lmrk_lines = None
+            for pts_line in pts_lines:
+                if pts_line == '{':
+                    lmrk_lines = []
+                elif pts_line == '}':
+                    break
+                else:
+                    if lmrk_lines is not None:
+                        lmrk_lines.append (pts_line)
+
+            if lmrk_lines is not None and len(lmrk_lines) == 68:
+                try:
+                    lmrks = [ np.array ( lmrk_line.strip().split(' ') ).astype(np.float32).tolist() for lmrk_line in lmrk_lines]
+                except Exception as e:
+                    print(e)
+                    print(filepath)
+                    continue
+
+                rect = LandmarksProcessor.get_rect_from_landmarks(lmrks)
+
+                output_filepath = output_path / (filepath.stem+'.jpg')
+
+                img = cv2_imread(filepath)
+                img = imagelib.normalize_channels(img, 3)
+                cv2_imwrite(output_filepath, img, [int(cv2.IMWRITE_JPEG_QUALITY), 95] )
+
+                DFLJPG.embed_data(output_filepath, face_type=FaceType.toString(FaceType.MARK_ONLY),
+                                                landmarks=lmrks,
+                                                source_filename=filepath.name,
+                                                source_rect=rect,
+                                                source_landmarks=lmrks
+                                    )
+
+    io.log_info("Done.")
+
+#unused in end user workflow
 def extract_umd_csv(input_file_csv,
-                    image_size=256,
                     face_type='full_face',
                     device_args={} ):
 
@@ -456,7 +524,7 @@ def extract_umd_csv(input_file_csv,
         data = ExtractSubprocessor (data, 'landmarks', multi_gpu=multi_gpu, cpu_only=cpu_only).run()
 
         io.log_info ('Performing 3rd pass...')
-        data = ExtractSubprocessor (data, 'final', image_size, face_type, None, multi_gpu=multi_gpu, cpu_only=cpu_only, manual=False, final_output_path=output_path).run()
+        data = ExtractSubprocessor (data, 'final', face_type, None, multi_gpu=multi_gpu, cpu_only=cpu_only, manual=False, final_output_path=output_path).run()
         faces_detected += sum([d.faces_detected for d in data])
 
 
@@ -465,7 +533,7 @@ def extract_umd_csv(input_file_csv,
     io.log_info ('Faces detected:      %d' % (faces_detected) )
     io.log_info ('-------------------------')
 
-def dev_test(input_dir):
+def dev_test1(input_dir):
     input_path = Path(input_dir)
 
     dir_names = pathex.get_all_dir_names(input_path)
@@ -485,3 +553,115 @@ def dev_test(input_dir):
             #import code
             #code.interact(local=dict(globals(), **locals()))
 
+
+def dev_segmented_extract(input_dir, output_dir ):
+    # extract and merge .json labelme files within the faces
+      
+    device_config = nn.DeviceConfig.GPUIndexes( nn.ask_choose_device_idxs(suggest_all_gpu=True) )
+    
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        raise ValueError('input_dir not found. Please ensure it exists.')
+
+    output_path = Path(output_dir)
+    io.log_info("Performing extract segmented faces.")
+    io.log_info(f'Output dir is {output_path}')
+    
+    if output_path.exists():
+        output_images_paths = pathex.get_image_paths(output_path)
+        if len(output_images_paths) > 0:
+            io.input_bool("WARNING !!! \n %s contains files! \n They will be deleted. \n Press enter to continue." % (str(output_path)), False )
+            for filename in output_images_paths:
+                Path(filename).unlink()
+    else:
+        output_path.mkdir(parents=True, exist_ok=True)
+
+    images_paths = pathex.get_image_paths(input_path)
+
+    extract_data = []    
+    images_jsons = {}
+    images_processed = 0
+    
+    
+    for filepath in io.progress_bar_generator(images_paths, "Processing"):
+        filepath = Path(filepath)
+        json_filepath = filepath.parent / (filepath.stem+'.json')        
+        
+        if json_filepath.exists():
+            try:
+                json_dict = json.loads(json_filepath.read_text())
+                images_jsons[filepath] = json_dict
+                
+                total_points = [ [x,y] for shape in json_dict['shapes'] for x,y in shape['points'] ]
+                total_points = np.array(total_points)
+
+                if len(total_points) == 0:
+                    io.log_info(f"No points found in {json_filepath}, skipping.")
+                    continue
+                
+                l,r = int(total_points[:,0].min()), int(total_points[:,0].max())
+                t,b = int(total_points[:,1].min()), int(total_points[:,1].max())
+                
+                extract_data.append ( ExtractSubprocessor.Data(filepath, rects=[ [l,t,r,b] ] ) ) 
+                images_processed += 1
+            except:                
+                io.log_err(f"err {filepath}")
+                return
+            
+    image_size = 1024
+    face_type = FaceType.HEAD  
+    extract_data = ExtractSubprocessor (extract_data, 'landmarks', image_size, face_type, device_config=device_config).run()
+    extract_data = ExtractSubprocessor (extract_data, 'final', image_size, face_type, final_output_path=output_path, device_config=device_config).run()
+                
+    for data in extract_data:
+        filepath = output_path / (data.filepath.stem+'_0.jpg')
+
+        dflimg = DFLIMG.load(filepath)
+        image_to_face_mat = dflimg.get_image_to_face_mat()
+        
+        json_dict = images_jsons[data.filepath]
+
+        ie_polys = IEPolys()
+        for shape in json_dict['shapes']:                
+            ie_poly = ie_polys.add(1)
+ 
+            points = np.array( [ [x,y] for x,y in shape['points'] ] )
+            points = LandmarksProcessor.transform_points(points, image_to_face_mat)
+            
+            for x,y in points:
+                ie_poly.add( int(x), int(y) )
+
+        dflimg.embed_and_set (filepath, ie_polys=ie_polys)
+                            
+    io.log_info(f"Images found:     {len(images_paths)}")
+    io.log_info(f"Images processed: {images_processed}")
+    
+
+
+"""
+#mark only
+for data in extract_data:
+    filepath = data.filepath
+    output_filepath = output_path / (filepath.stem+'.jpg')
+    
+    img = cv2_imread(filepath)
+    img = imagelib.normalize_channels(img, 3)
+    cv2_imwrite(output_filepath, img, [int(cv2.IMWRITE_JPEG_QUALITY), 100] )
+    
+    json_dict = images_jsons[filepath]
+    
+    ie_polys = IEPolys()
+    for shape in json_dict['shapes']:                
+        ie_poly = ie_polys.add(1)               
+        for x,y in shape['points']:
+            ie_poly.add( int(x), int(y) )            
+        
+        
+    DFLJPG.embed_data(output_filepath, face_type=FaceType.toString(FaceType.MARK_ONLY),
+                                        landmarks=data.landmarks[0],
+                                        ie_polys=ie_polys,
+                                        source_filename=filepath.name,
+                                        source_rect=data.rects[0],
+                                        source_landmarks=data.landmarks[0]
+                        )
+"""

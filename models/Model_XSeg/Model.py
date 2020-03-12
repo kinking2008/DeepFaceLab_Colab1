@@ -11,7 +11,7 @@ from facelib import FaceType, TernausNet
 from models import ModelBase
 from samplelib import *
 
-class FANSegModel(ModelBase):
+class XSegModel(ModelBase):
 
     #override
     def on_initialize_options(self):
@@ -19,8 +19,7 @@ class FANSegModel(ModelBase):
         yn_str = {True:'y',False:'n'}
 
         #default_resolution = 256
-        #default_face_type = self.options['face_type'] = self.load_or_def_option('face_type', 'f')
-        
+  
         ask_override = self.ask_override()
         if self.is_first_run() or ask_override:
             self.ask_autobackup_hour()
@@ -31,38 +30,33 @@ class FANSegModel(ModelBase):
         #resolution = io.input_int("Resolution", default_resolution, add_info="64-512")
         #resolution = np.clip ( (resolution // 16) * 16, 64, 512)
         #self.options['resolution'] = resolution
-        #self.options['face_type'] = io.input_str ("Face type", default_face_type, ['f']).lower()
 
     #override
     def on_initialize(self):
         device_config = nn.getCurrentDeviceConfig()
-        nn.initialize(data_format="NHWC")
+        self.model_data_format = "NCHW" if len(device_config.devices) != 0 and not self.is_debug() else "NHWC"
+        nn.initialize(data_format=self.model_data_format)
         tf = nn.tf
 
         device_config = nn.getCurrentDeviceConfig()
         devices = device_config.devices
 
         self.resolution = resolution = 256#self.options['resolution']
-        #self.face_type = {'h'  : FaceType.HALF,
-        #                  'mf' : FaceType.MID_FULL,
-        #                  'f'  : FaceType.FULL,
-        #                  'wf' : FaceType.WHOLE_FACE}[ self.options['face_type'] ]
-        self.face_type = FaceType.FULL
-         
-        place_model_on_cpu = len(devices) == 0
+
+        place_model_on_cpu = True#len(devices) == 0
         models_opt_device = '/CPU:0' if place_model_on_cpu else '/GPU:0'
 
         bgr_shape = nn.get4Dshape(resolution,resolution,3)
         mask_shape = nn.get4Dshape(resolution,resolution,1)
  
         # Initializing model classes
-        self.model = TernausNet(f'{self.model_name}_FANSeg', 
+        self.model = TernausNet(f'{self.model_name}_SkinSeg', 
                                  resolution, 
-                                 FaceType.toString(self.face_type), 
                                  load_weights=not self.is_first_run(),
                                  weights_file_root=self.get_model_root_path(),
                                  training=True,
-                                 place_model_on_cpu=place_model_on_cpu)
+                                 place_model_on_cpu=place_model_on_cpu,
+                                 data_format=nn.data_format)
                                  
         if self.is_training:
             # Adjust batch size for multiple GPU
@@ -115,29 +109,21 @@ class FANSegModel(ModelBase):
             self.view = view
 
             # initializing sample generators
-            training_data_src_path = self.training_data_src_path
-            training_data_dst_path = self.training_data_dst_path
-
             cpu_count = min(multiprocessing.cpu_count(), 8)
             src_generators_count = cpu_count // 2
             dst_generators_count = cpu_count // 2
             src_generators_count = int(src_generators_count * 1.5)
-
-            src_generator = SampleGeneratorFace(training_data_src_path, random_ct_samples_path=training_data_src_path, debug=self.is_debug(), batch_size=self.get_batch_size(),
+            
+            
+            src_generator = SampleGeneratorFaceCelebAMaskHQ ( root_path=self.training_data_src_path, debug=self.is_debug(), batch_size=self.get_batch_size(), resolution=256, generators_count=src_generators_count, data_format = nn.data_format)
+            
+            dst_generator = SampleGeneratorImage(self.training_data_dst_path, debug=self.is_debug(), batch_size=self.get_batch_size(),
                                                 sample_process_options=SampleProcessor.Options(random_flip=True),
-                                                output_sample_types = [ {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,  'ct_mode':'lct', 'warp':True, 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR,                                                            'face_type':self.face_type, 'motion_blur':(25, 5),  'gaussian_blur':(25,5), 'data_format':nn.data_format, 'resolution': resolution},
-                                                                        {'sample_type': SampleProcessor.SampleType.FACE_MASK,                    'warp':True, 'transform':True, 'channel_type' : SampleProcessor.ChannelType.G,   'face_mask_type' : SampleProcessor.FaceMaskType.FULL_FACE, 'face_type':self.face_type,                                                 'data_format':nn.data_format, 'resolution': resolution},
-                                                                        ],
-                                                generators_count=src_generators_count )
-                                                
-            dst_generator = SampleGeneratorFace(training_data_dst_path, debug=self.is_debug(), batch_size=self.get_batch_size(),
-                                                sample_process_options=SampleProcessor.Options(random_flip=True),
-                                                output_sample_types = [ {'sample_type': SampleProcessor.SampleType.FACE_IMAGE,  'warp':False, 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR, 'face_type':self.face_type, 'motion_blur':(25, 5),  'gaussian_blur':(25,5), 'data_format':nn.data_format, 'resolution': resolution},
-                                                                    ],
+                                                output_sample_types = [ {'sample_type': SampleProcessor.SampleType.IMAGE,  'warp':False, 'transform':True, 'channel_type' : SampleProcessor.ChannelType.BGR, 'data_format':nn.data_format, 'resolution': resolution} ],
                                                 generators_count=dst_generators_count,
                                                 raise_on_no_data=False )
             if not dst_generator.is_initialized():
-                io.log_info(f"\nTo view the model on unseen faces, place any aligned faces in {training_data_dst_path}.\n")
+                io.log_info(f"\nTo view the model on unseen faces, place any image faces in {self.training_data_dst_path}.\n")
                 
             self.set_training_data_generators ([src_generator, dst_generator])
 
@@ -151,8 +137,8 @@ class FANSegModel(ModelBase):
         
     #override
     def onTrainOneIter(self):        
-        source_np, target_np = self.generate_next_samples()[0]
-        loss = self.train (source_np, target_np)       
+        image_np, mask_np = self.generate_next_samples()[0]
+        loss = self.train (image_np, mask_np)       
 
         return ( ('loss', loss ), )
 
@@ -161,24 +147,25 @@ class FANSegModel(ModelBase):
         n_samples = min(4, self.get_batch_size(), 800 // self.resolution )
 
         src_samples, dst_samples = samples        
-        source_np, target_np = src_samples
+        image_np, mask_np = src_samples
 
-        S, TM, SM, = [ np.clip(x, 0.0, 1.0) for x in ([source_np,target_np] + self.view (source_np) ) ]
-        TM, SM, = [ np.repeat (x, (3,), -1) for x in [TM, SM] ]
+        I, M, IM, = [ np.clip( nn.to_data_format(x,"NHWC", self.model_data_format), 0.0, 1.0) for x in ([image_np,mask_np] + self.view (image_np) ) ]
+        M, IM, = [ np.repeat (x, (3,), -1) for x in [M, IM] ]
 
         green_bg = np.tile( np.array([0,1,0], dtype=np.float32)[None,None,...], (self.resolution,self.resolution,1) )
 
         result = []        
         st = []
         for i in range(n_samples):
-            ar = S[i]*TM[i]+ green_bg*(1-TM[i]), SM[i], S[i]*SM[i] + green_bg*(1-SM[i])
+            ar = I[i]*M[i]+ green_bg*(1-M[i]), IM[i], I[i]*IM[i] + green_bg*(1-IM[i])
             st.append ( np.concatenate ( ar, axis=1) )
-        result += [ ('FANSeg training faces', np.concatenate (st, axis=0 )), ]
+        result += [ ('XSeg training faces', np.concatenate (st, axis=0 )), ]
         
         if len(dst_samples) != 0:
             dst_np, = dst_samples
             
-            D, DM, = [ np.clip(x, 0.0, 1.0) for x in ([dst_np] + self.view (dst_np) ) ]
+
+            D, DM, = [ np.clip(nn.to_data_format(x,"NHWC", self.model_data_format), 0.0, 1.0) for x in ([dst_np] + self.view (dst_np) ) ]
             DM, = [ np.repeat (x, (3,), -1) for x in [DM] ]
         
             st = []
@@ -186,8 +173,8 @@ class FANSegModel(ModelBase):
                 ar = D[i], DM[i], D[i]*DM[i]+ green_bg*(1-DM[i])
                 st.append ( np.concatenate ( ar, axis=1) )
             
-            result += [ ('FANSeg unseen faces', np.concatenate (st, axis=0 )), ]
+            result += [ ('XSeg unseen faces', np.concatenate (st, axis=0 )), ]
             
         return result
 
-Model = FANSegModel
+Model = XSegModel

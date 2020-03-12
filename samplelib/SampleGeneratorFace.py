@@ -27,23 +27,28 @@ class SampleGeneratorFace(SampleGeneratorBase):
                         output_sample_types=[],
                         add_sample_idx=False,
                         generators_count=4,
+                        raise_on_no_data=True,
                         **kwargs):
 
-        super().__init__(samples_path, debug, batch_size)
+        super().__init__(debug, batch_size)
         self.sample_process_options = sample_process_options
         self.output_sample_types = output_sample_types
         self.add_sample_idx = add_sample_idx
-
+        
         if self.debug:
             self.generators_count = 1
         else:
             self.generators_count = max(1, generators_count)
 
-        samples = SampleLoader.load (SampleType.FACE, self.samples_path)
+        samples = SampleLoader.load (SampleType.FACE, samples_path)
         self.samples_len = len(samples)
 
+        self.initialized = False
         if self.samples_len == 0:
-            raise ValueError('No training data provided.')
+            if raise_on_no_data:
+                raise ValueError('No training data provided.')
+            else:
+                return
 
         index_host = mplib.IndexHost(self.samples_len)
 
@@ -60,10 +65,19 @@ class SampleGeneratorFace(SampleGeneratorBase):
         if self.debug:
             self.generators = [ThisThreadGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(), ct_pickled_samples, ct_index_host.create_cli() if ct_index_host is not None else None) )]
         else:
-            self.generators = [SubprocessGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(), ct_pickled_samples, ct_index_host.create_cli() if ct_index_host is not None else None), start_now=True ) for i in range(self.generators_count) ]
+            self.generators = [SubprocessGenerator ( self.batch_func, (pickled_samples, index_host.create_cli(), ct_pickled_samples, ct_index_host.create_cli() if ct_index_host is not None else None), start_now=False ) \
+                               for i in range(self.generators_count) ]
+                               
+            SubprocessGenerator.start_in_parallel( self.generators )
 
         self.generator_counter = -1
-
+        
+        self.initialized = True
+        
+    #overridable
+    def is_initialized(self):
+        return self.initialized
+        
     def __iter__(self):
         return self
 
@@ -74,7 +88,7 @@ class SampleGeneratorFace(SampleGeneratorBase):
 
     def batch_func(self, param ):
         pickled_samples, index_host, ct_pickled_samples, ct_index_host = param
-
+        
         samples = pickle.loads(pickled_samples)
         ct_samples = pickle.loads(ct_pickled_samples) if ct_pickled_samples is not None else None
 

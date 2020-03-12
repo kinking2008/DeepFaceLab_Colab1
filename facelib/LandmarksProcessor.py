@@ -188,8 +188,9 @@ FaceType_to_padding_remove_align = {
     FaceType.MID_FULL: (0.0675, False),
     FaceType.FULL: (0.2109375, False),
     FaceType.FULL_NO_ALIGN: (0.2109375, True),
-    FaceType.HEAD: (0.369140625, False),
-    FaceType.HEAD_NO_ALIGN: (0.369140625, True),
+    FaceType.WHOLE_FACE: (0.40, False),
+    FaceType.HEAD: (1.0, False),
+    FaceType.HEAD_NO_ALIGN: (1.0, True),
 }
 
 def convert_98_to_68(lmrks):
@@ -249,77 +250,73 @@ def transform_points(points, mat, invert=False):
     points = np.squeeze(points)
     return points
 
-def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0, full_face_align_top=True):
+def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
     if not isinstance(image_landmarks, np.ndarray):
         image_landmarks = np.array (image_landmarks)
 
-    padding, remove_align = FaceType_to_padding_remove_align.get(face_type, 0.0)
-
+    # estimate landmarks transform from global space to local aligned space with bounds [0..1]
     mat = umeyama( np.concatenate ( [ image_landmarks[17:49] , image_landmarks[54:55] ] ) , landmarks_2D_new, True)[0:2]
-    l_p = transform_points (  np.float32([(0,0),(1,0),(1,1),(0,1),(0.5,0.5)]) , mat, True)
-    l_c = l_p[4]
+    
+    # get corner points in global space
+    g_p = transform_points (  np.float32([(0,0),(1,0),(1,1),(0,1),(0.5,0.5) ]) , mat, True)
+    g_c = g_p[4]
 
-    tb_diag_vec = (l_p[2]-l_p[0]).astype(np.float32)
+    # calc diagonal vectors between corners in global space
+    tb_diag_vec = (g_p[2]-g_p[0]).astype(np.float32)
     tb_diag_vec /= npla.norm(tb_diag_vec)
-    bt_diag_vec = (l_p[1]-l_p[3]).astype(np.float32)
+    bt_diag_vec = (g_p[1]-g_p[3]).astype(np.float32)
     bt_diag_vec /= npla.norm(bt_diag_vec)
 
-    mod = (1.0 / scale)* ( npla.norm(l_p[0]-l_p[2])*(padding*np.sqrt(2.0) + 0.5) )
-
+    # calc modifier of diagonal vectors for scale and padding value
+    padding, remove_align = FaceType_to_padding_remove_align.get(face_type, 0.0)
+    mod = (1.0 / scale)* ( npla.norm(g_p[0]-g_p[2])*(padding*np.sqrt(2.0) + 0.5) )
+    
+    if face_type == FaceType.WHOLE_FACE:
+        # adjust center for WHOLE_FACE, 7% below in order to cover more forehead
+        vec = (g_p[0]-g_p[3]).astype(np.float32)
+        vec_len = npla.norm(vec)
+        vec /= vec_len
+        
+        g_c += vec*vec_len*0.07
+    
+    # calc 3 points in global space to estimate 2d affine transform 
     if not remove_align:
-        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
-                          np.round( l_c + bt_diag_vec*mod ),
-                          np.round( l_c + tb_diag_vec*mod ) ] )
+        l_t = np.array( [ np.round( g_c - tb_diag_vec*mod ),
+                          np.round( g_c + bt_diag_vec*mod ),
+                          np.round( g_c + tb_diag_vec*mod ) ] )
     else:
-        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
-                          np.round( l_c + bt_diag_vec*mod ),
-                          np.round( l_c + tb_diag_vec*mod ),
-                          np.round( l_c - bt_diag_vec*mod ),
+        # remove_align - face will be centered in the frame but not aligned
+        l_t = np.array( [ np.round( g_c - tb_diag_vec*mod ),
+                          np.round( g_c + bt_diag_vec*mod ),
+                          np.round( g_c + tb_diag_vec*mod ),
+                          np.round( g_c - bt_diag_vec*mod ),
                          ] )
 
+        # get area of face square in global space
         area = mathlib.polygon_area(l_t[:,0], l_t[:,1] )
+        
+        # calc side of square
         side = np.float32(math.sqrt(area) / 2)
-        l_t = np.array( [ np.round( l_c + [-side,-side] ),
-                          np.round( l_c + [ side,-side] ),
-                          np.round( l_c + [ side, side] ) ] )
+        
+        # calc 3 points with unrotated square
+        l_t = np.array( [ np.round( g_c + [-side,-side] ),
+                          np.round( g_c + [ side,-side] ),
+                          np.round( g_c + [ side, side] ) ] )
 
+    # calc affine transform from 3 global space points to 3 local space points size of 'output_size'
     pts2 = np.float32(( (0,0),(output_size,0),(output_size,output_size) ))
     mat = cv2.getAffineTransform(l_t,pts2)
-
-
-    #if remove_align:
-    #    bbox = transform_points ( [ (0,0), (0,output_size), (output_size, output_size), (output_size,0) ], mat, True)
-    #    #import code
-    #    #code.interact(local=dict(globals(), **locals()))
-    #    area = mathlib.polygon_area(bbox[:,0], bbox[:,1] )
-    #    side = math.sqrt(area) / 2
-    #    center = transform_points ( [(output_size/2,output_size/2)], mat, True)
-    #    pts1 = np.float32(( center+[-side,-side], center+[side,-side], center+[side,-side] ))
-    #    pts2 = np.float32([[0,0],[output_size,0],[0,output_size]])
-    #    mat = cv2.getAffineTransform(pts1,pts2)
-
     return mat
+  
+def get_rect_from_landmarks(image_landmarks):
+    mat = get_transform_mat(image_landmarks, 256, FaceType.FULL_NO_ALIGN)
+    
+    g_p = transform_points (  np.float32([(0,0),(255,255) ]) , mat, True)
+    
+    (l,t,r,b) = g_p[0][0], g_p[0][1], g_p[1][0], g_p[1][1]
+    
+    return (l,t,r,b)
 
-#if full_face_align_top and (face_type == FaceType.FULL or face_type == FaceType.FULL_NO_ALIGN):
-#    #lmrks2 = expand_eyebrows(image_landmarks)
-#    #lmrks2_ = transform_points( [ lmrks2[19], lmrks2[24] ], mat, False )
-#    #y_diff = np.float32( (0,np.min(lmrks2_[:,1])) )
-#    #y_diff = transform_points( [ np.float32( (0,0) ), y_diff], mat, True)
-#    #y_diff = y_diff[1]-y_diff[0]
-#
-#    x_diff = np.float32((0,0))
-#
-#    lmrks2_ = transform_points( [ image_landmarks[0], image_landmarks[16] ], mat, False )
-#    if lmrks2_[0,0] < 0:
-#        x_diff = lmrks2_[0,0]
-#        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
-#        x_diff = x_diff[1]-x_diff[0]
-#    elif lmrks2_[1,0] >= output_size:
-#        x_diff = lmrks2_[1,0]-(output_size-1)
-#        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
-#        x_diff = x_diff[1]-x_diff[0]
-#
-#    mat = cv2.getAffineTransform( l_t+y_diff+x_diff ,pts2)
 def expand_eyebrows(lmrks, eyebrows_expand_mod=1.0):
     if len(lmrks) != 68:
         raise Exception('works only with 68 landmarks')
@@ -349,8 +346,8 @@ def expand_eyebrows(lmrks, eyebrows_expand_mod=1.0):
 
 
 
-def get_image_hull_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, ie_polys=None, color=(1,) ):
-    hull_mask = np.zeros(image_shape[0:2]+( len(color),),dtype=np.float32)
+def get_image_hull_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, ie_polys=None ):
+    hull_mask = np.zeros(image_shape[0:2]+(1,),dtype=np.float32)
 
     lmrks = expand_eyebrows(image_landmarks, eyebrows_expand_mod)
 
@@ -366,7 +363,7 @@ def get_image_hull_mask (image_shape, image_landmarks, eyebrows_expand_mod=1.0, 
 
     for item in parts:
         merged = np.concatenate(item)
-        cv2.fillConvexPoly(hull_mask, cv2.convexHull(merged), color )
+        cv2.fillConvexPoly(hull_mask, cv2.convexHull(merged), (1,) )
 
     if ie_polys is not None:
         ie_polys.overlay_mask(hull_mask)
@@ -411,7 +408,7 @@ def alpha_to_color (img_alpha, color):
 def get_cmask (image_shape, lmrks, eyebrows_expand_mod=1.0):
     h,w,c = image_shape
 
-    hull = get_image_hull_mask (image_shape, lmrks, eyebrows_expand_mod, color=(1,) )
+    hull = get_image_hull_mask (image_shape, lmrks, eyebrows_expand_mod )
 
     result = np.zeros( (h,w,3), dtype=np.float32 )
 
@@ -661,7 +658,7 @@ def draw_landmarks (image, image_landmarks, color=(0,255,0), draw_circles=True, 
         mask = get_image_hull_mask (image.shape, image_landmarks, ie_polys=ie_polys)
         image[...] = ( image * (1-mask) + image * mask / 2 )[...]
 
-def draw_rect_landmarks (image, rect, image_landmarks, face_size, face_type, transparent_mask=False, ie_polys=None, landmarks_color=(0,255,0)):
+def draw_rect_landmarks (image, rect, image_landmarks, face_type, face_size=256, transparent_mask=False, ie_polys=None, landmarks_color=(0,255,0)):
     draw_landmarks(image, image_landmarks, color=landmarks_color, transparent_mask=transparent_mask, ie_polys=ie_polys)
     imagelib.draw_rect (image, rect, (255,0,0), 2 )
 
@@ -671,26 +668,19 @@ def draw_rect_landmarks (image, rect, image_landmarks, face_size, face_type, tra
 
     points = transform_points ( [ ( int(face_size*0.05), 0), ( int(face_size*0.1), int(face_size*0.1) ), ( 0, int(face_size*0.1) ) ], image_to_face_mat, True)
     imagelib.draw_polygon (image, points, (0,0,255), 2)
-
+    
 def calc_face_pitch(landmarks):
     if not isinstance(landmarks, np.ndarray):
         landmarks = np.array (landmarks)
     t = ( (landmarks[6][1]-landmarks[8][1]) + (landmarks[10][1]-landmarks[8][1]) ) / 2.0
     b = landmarks[8][1]
     return float(b-t)
-
-def calc_face_yaw(landmarks):
-    if not isinstance(landmarks, np.ndarray):
-        landmarks = np.array (landmarks)
-    l = ( (landmarks[27][0]-landmarks[0][0]) + (landmarks[28][0]-landmarks[1][0]) + (landmarks[29][0]-landmarks[2][0]) ) / 3.0
-    r = ( (landmarks[16][0]-landmarks[27][0]) + (landmarks[15][0]-landmarks[28][0]) + (landmarks[14][0]-landmarks[29][0]) ) / 3.0
-    return float(r-l)
-
-def estimate_pitch_yaw_roll(aligned_256px_landmarks):
+    
+def estimate_pitch_yaw_roll(aligned_landmarks, size=256):
     """
     returns pitch,yaw,roll [-pi...+pi]
     """
-    shape = (256,256)
+    shape = (size,size)
     focal_length = shape[1]
     camera_center = (shape[1] / 2, shape[0] / 2)
     camera_matrix = np.array(
@@ -700,7 +690,7 @@ def estimate_pitch_yaw_roll(aligned_256px_landmarks):
 
     (_, rotation_vector, translation_vector) = cv2.solvePnP(
         landmarks_68_3D,
-        aligned_256px_landmarks.astype(np.float32),
+        aligned_landmarks.astype(np.float32),
         camera_matrix,
         np.zeros((4, 1)) )
 
@@ -710,3 +700,132 @@ def estimate_pitch_yaw_roll(aligned_256px_landmarks):
     roll = np.clip ( roll, -math.pi, math.pi )
 
     return -pitch, yaw, roll
+    
+#if remove_align:
+#    bbox = transform_points ( [ (0,0), (0,output_size), (output_size, output_size), (output_size,0) ], mat, True)
+#    #import code
+#    #code.interact(local=dict(globals(), **locals()))
+#    area = mathlib.polygon_area(bbox[:,0], bbox[:,1] )
+#    side = math.sqrt(area) / 2
+#    center = transform_points ( [(output_size/2,output_size/2)], mat, True)
+#    pts1 = np.float32(( center+[-side,-side], center+[side,-side], center+[side,-side] ))
+#    pts2 = np.float32([[0,0],[output_size,0],[0,output_size]])
+#    mat = cv2.getAffineTransform(pts1,pts2)
+#if full_face_align_top and (face_type == FaceType.FULL or face_type == FaceType.FULL_NO_ALIGN):
+#    #lmrks2 = expand_eyebrows(image_landmarks)
+#    #lmrks2_ = transform_points( [ lmrks2[19], lmrks2[24] ], mat, False )
+#    #y_diff = np.float32( (0,np.min(lmrks2_[:,1])) )
+#    #y_diff = transform_points( [ np.float32( (0,0) ), y_diff], mat, True)
+#    #y_diff = y_diff[1]-y_diff[0]
+#
+#    x_diff = np.float32((0,0))
+#
+#    lmrks2_ = transform_points( [ image_landmarks[0], image_landmarks[16] ], mat, False )
+#    if lmrks2_[0,0] < 0:
+#        x_diff = lmrks2_[0,0]
+#        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
+#        x_diff = x_diff[1]-x_diff[0]
+#    elif lmrks2_[1,0] >= output_size:
+#        x_diff = lmrks2_[1,0]-(output_size-1)
+#        x_diff = transform_points( [ np.float32( (0,0) ), np.float32((x_diff,0)) ], mat, True)
+#        x_diff = x_diff[1]-x_diff[0]
+#
+#    mat = cv2.getAffineTransform( l_t+y_diff+x_diff ,pts2)
+
+
+"""
+def get_averaged_transform_mat (img_landmarks, 
+                                img_landmarks_prev, 
+                                img_landmarks_next, 
+                                average_frame_count, 
+                                average_center_frame_count,
+                                output_size, face_type, scale=1.0):
+    
+    l_c_list = []
+    tb_diag_vec_list = []
+    bt_diag_vec_list = []
+    mod_list = []
+    
+    count = max(average_frame_count,average_center_frame_count)
+    for i in range ( -count, count+1, 1 ):        
+        if i < 0:
+            lmrks = img_landmarks_prev[i] if -i < len(img_landmarks_prev) else None
+        elif i > 0:
+            lmrks = img_landmarks_next[i] if i < len(img_landmarks_next) else None
+        else:
+            lmrks = img_landmarks
+        
+        if lmrks is None:
+            continue
+        
+        l_c, tb_diag_vec, bt_diag_vec, mod = get_transform_mat_data (lmrks, face_type, scale=scale)
+        
+        if i >= -average_frame_count and i <= average_frame_count:
+            tb_diag_vec_list.append(tb_diag_vec)
+            bt_diag_vec_list.append(bt_diag_vec)
+            mod_list.append(mod)
+            
+        if i >= -average_center_frame_count and i <= average_center_frame_count:
+            l_c_list.append(l_c)
+    
+    tb_diag_vec = np.mean( np.array(tb_diag_vec_list), axis=0 )
+    bt_diag_vec = np.mean( np.array(bt_diag_vec_list), axis=0 )
+    mod         = np.mean( np.array(mod_list), axis=0 )    
+    l_c         = np.mean( np.array(l_c_list), axis=0 )
+
+    return get_transform_mat_by_data (l_c, tb_diag_vec, bt_diag_vec, mod, output_size, face_type)
+    
+    
+def get_transform_mat (image_landmarks, output_size, face_type, scale=1.0):
+    if not isinstance(image_landmarks, np.ndarray):
+        image_landmarks = np.array (image_landmarks)
+
+    # get face padding value for FaceType
+    padding, remove_align = FaceType_to_padding_remove_align.get(face_type, 0.0)
+
+    # estimate landmarks transform from global space to local aligned space with bounds [0..1]
+    mat = umeyama( np.concatenate ( [ image_landmarks[17:49] , image_landmarks[54:55] ] ) , landmarks_2D_new, True)[0:2]
+    
+    # get corner points in global space
+    l_p = transform_points (  np.float32([(0,0),(1,0),(1,1),(0,1),(0.5,0.5)]) , mat, True)
+    l_c = l_p[4]
+
+    # calc diagonal vectors between corners in global space
+    tb_diag_vec = (l_p[2]-l_p[0]).astype(np.float32)
+    tb_diag_vec /= npla.norm(tb_diag_vec)
+    bt_diag_vec = (l_p[1]-l_p[3]).astype(np.float32)
+    bt_diag_vec /= npla.norm(bt_diag_vec)
+
+    # calc modifier of diagonal vectors for scale and padding value
+    mod = (1.0 / scale)* ( npla.norm(l_p[0]-l_p[2])*(padding*np.sqrt(2.0) + 0.5) )
+
+    # calc 3 points in global space to estimate 2d affine transform 
+    if not remove_align:
+        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
+                          np.round( l_c + bt_diag_vec*mod ),
+                          np.round( l_c + tb_diag_vec*mod ) ] )
+    else:
+        # remove_align - face will be centered in the frame but not aligned
+        l_t = np.array( [ np.round( l_c - tb_diag_vec*mod ),
+                          np.round( l_c + bt_diag_vec*mod ),
+                          np.round( l_c + tb_diag_vec*mod ),
+                          np.round( l_c - bt_diag_vec*mod ),
+                         ] )
+
+        # get area of face square in global space
+        area = mathlib.polygon_area(l_t[:,0], l_t[:,1] )
+        
+        # calc side of square
+        side = np.float32(math.sqrt(area) / 2)
+        
+        # calc 3 points with unrotated square
+        l_t = np.array( [ np.round( l_c + [-side,-side] ),
+                          np.round( l_c + [ side,-side] ),
+                          np.round( l_c + [ side, side] ) ] )
+
+    # calc affine transform from 3 global space points to 3 local space points size of 'output_size'
+    pts2 = np.float32(( (0,0),(output_size,0),(output_size,output_size) ))
+    mat = cv2.getAffineTransform(l_t,pts2)
+    
+    return mat
+"""

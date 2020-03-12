@@ -180,7 +180,7 @@ class MergeSubprocessor(Subprocessor):
         if len (frames) == 0:
             raise ValueError ("len (frames) == 0")
 
-        super().__init__('Merger', MergeSubprocessor.Cli, 86400 if MERGER_DEBUG else 60, io_loop_sleep_time=0.001)
+        super().__init__('Merger', MergeSubprocessor.Cli, io_loop_sleep_time=0.001)
 
         self.is_interactive = is_interactive
         self.merger_session_filepath = Path(merger_session_filepath)
@@ -673,7 +673,8 @@ def main (model_class_name=None,
             cfg.ask_settings()
 
         input_path_image_paths = pathex.get_image_paths(input_path)
-
+        
+ 
         if cfg.type == MergerConfig.TYPE_MASKED:
             if not aligned_path.exists():
                 io.log_err('Aligned directory not found. Please ensure it exists.')
@@ -783,6 +784,8 @@ def main (model_class_name=None,
 
 
         elif cfg.type == MergerConfig.TYPE_FACE_AVATAR:
+            pass
+            """
             filesdata = []
             for filepath in io.progress_bar_generator(input_path_image_paths, "Collecting info"):
                 filepath = Path(filepath)
@@ -812,7 +815,7 @@ def main (model_class_name=None,
                 frames.append ( MergeSubprocessor.Frame(prev_temporal_frame_infos=prev_temporal_frame_infos,
                                                           frame_info=frame_info,
                                                           next_temporal_frame_infos=next_temporal_frame_infos) )
-
+            """
         if len(frames) == 0:
             io.log_info ("No frames to merge in input_dir.")
         else:

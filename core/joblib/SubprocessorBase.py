@@ -55,9 +55,9 @@ class Subprocessor(object):
         def progress_bar_inc(self, c): self.c2s.put ( {'op': 'progress_bar_inc' , 'c':c } )
 
         def _subprocess_run(self, client_dict, s2c, c2s):
-            self.s2c = s2c
             self.c2s = c2s
             data = None
+            is_error = False
             try:
                 self.on_initialize(client_dict)
 
@@ -78,16 +78,18 @@ class Subprocessor(object):
 
                 self.on_finalize()
                 c2s.put ( {'op': 'finalized'} )
-                return
             except Subprocessor.SilenceException as e:
-                pass
+                c2s.put ( {'op': 'error', 'data' : data} )
             except Exception as e:
+                c2s.put ( {'op': 'error', 'data' : data} )
                 if data is not None:
                     print ('Exception while process data [%s]: %s' % (self.get_data_name(data), traceback.format_exc()) )
                 else:
                     print ('Exception: %s' % (traceback.format_exc()) )
 
-            c2s.put ( {'op': 'error', 'data' : data} )
+            c2s.close()
+            s2c.close()
+            self.c2s = None
 
         # disable pickling
         def __getstate__(self):
@@ -289,7 +291,7 @@ class Subprocessor(object):
                         terminate_it = True
                         break
 
-                if self.no_response_time_sec != 0 and (time.time() - cli.sent_time) > self.no_response_time_sec:
+                if (time.time() - cli.sent_time) > 30:
                     terminate_it = True
 
                 if terminate_it:
