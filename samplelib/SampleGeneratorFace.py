@@ -33,7 +33,7 @@ class SampleGeneratorFace(SampleGeneratorBase):
         self.sample_process_options = sample_process_options
         self.output_sample_types = output_sample_types
         self.add_sample_idx = add_sample_idx
-
+        
         if self.debug:
             self.generators_count = 1
         else:
@@ -77,7 +77,7 @@ class SampleGeneratorFace(SampleGeneratorBase):
 
     def batch_func(self, param ):
         pickled_samples, index_host, ct_pickled_samples, ct_index_host = param
-
+        
         samples = pickle.loads(pickled_samples)
         ct_samples = pickle.loads(ct_pickled_samples) if ct_pickled_samples is not None else None
 

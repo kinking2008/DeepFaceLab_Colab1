@@ -241,8 +241,8 @@ class ExtractSubprocessor(Subprocessor):
 
                         landmarks_bbox = LandmarksProcessor.transform_points ( [ (0,0), (0,image_size-1), (image_size-1, image_size-1), (image_size-1,0) ], image_to_face_mat, True)
 
-                        rect_area      = mathlib.polygon_area(np.array(rect[[0,2,2,0]]), np.array(rect[[1,1,3,3]]))
-                        landmarks_area = mathlib.polygon_area(landmarks_bbox[:,0], landmarks_bbox[:,1] )
+                        rect_area      = mathlib.polygon_area(np.array(rect[[0,2,2,0]]).astype(np.float32), np.array(rect[[1,1,3,3]]).astype(np.float32))
+                        landmarks_area = mathlib.polygon_area(landmarks_bbox[:,0].astype(np.float32), landmarks_bbox[:,1].astype(np.float32) )
 
                         if not data.manual and face_type <= FaceType.FULL_NO_ALIGN and landmarks_area > 4*rect_area: #get rid of faces which umeyama-landmark-area > 4*detector-rect-area
                             continue
@@ -261,7 +261,7 @@ class ExtractSubprocessor(Subprocessor):
                             shutil.copy ( str(filepath), str(output_filepath) )
                     else:
                         output_filepath = output_path / f"{filepath.stem}_{face_idx}.jpg"
-                        cv2_imwrite(output_filepath, face_image, [int(cv2.IMWRITE_JPEG_QUALITY), 100] )
+                        cv2_imwrite(output_filepath, face_image, [int(cv2.IMWRITE_JPEG_QUALITY), 90] )
 
                     DFLJPG.embed_data(output_filepath, face_type=FaceType.toString(face_type),
                                                     landmarks=face_image_landmarks.tolist(),
@@ -687,7 +687,7 @@ def main(detector=None,
          ):
     face_type = FaceType.fromString(face_type)
 
-    image_size = 512 if face_type == FaceType.WHOLE_FACE else 256
+    image_size = 512
     
     if not input_path.exists():
         io.log_err ('Input directory not found. Please ensure it exists.')
