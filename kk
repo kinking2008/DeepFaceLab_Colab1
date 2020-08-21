@@ -306,7 +306,11 @@
         "id": "MKQbOrIiyFJL",
         "colab_type": "code",
         "cellView": "both",
-        "colab": {}
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 33
+        },
+        "outputId": "19a4d83c-b2c7-465a-c1ff-9cfe15065310"
       },
       "source": [
         "#@title 开始训练\n",
@@ -317,7 +321,15 @@
         "!python $cmd"
       ],
       "execution_count": null,
-      "outputs": []
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Press enter in 2 seconds to override model settings."
+          ],
+          "name": "stdout"
+        }
+      ]
     },
     {
       "cell_type": "markdown",
